@@ -1,5 +1,13 @@
 #include "board.hpp"
 #include <cassert>
+#include <algorithm>
+#include <iomanip>
+#include <iostream>
+#include "output_operators.hpp"
+
+std::string get_piece_image(uint8_t x) {
+	return piece_images[x / 2 - 1];
+}
 
 std::string get_piece_string(uint8_t x) {
 	return piece_strings[x / 2 - 1];
@@ -24,6 +32,40 @@ std::vector<std::string> split(const std::string& str, char delimiter) { //TODO:
 	return tokens;
 }
 
+std::vector <dice_roll> dice_roll::strict_subsets() const {
+	std::vector<dice_roll> ret;
+	dice_roll oth = *this;
+	bool found_dec = true;
+	while (true) {
+		// std::cerr << "this.count = ";
+		// for (auto &x : this->count) std::cerr << (int)x << ", ";
+		// std::cerr << "\n";
+		// std::cerr << "oth.count = ";
+		// for (auto &x : oth.count) std::cerr << (int)x << ", ";
+		// std::cerr << "\n";
+		found_dec = false;
+		for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
+			if (oth.count[i]) {
+				oth.count[i]--;
+				found_dec = true;
+				break;
+			}
+			else {
+				oth.count[i] = this->count[i];
+			}
+		}
+		if (found_dec) ret.push_back(oth);
+		else break;
+	}
+	// std::cerr << " finding subsets of " << *this << ": ";
+	// for (auto &x : ret) std::cerr << x << ", ";
+	// std::cerr << "\n";
+	return ret;
+}
+
+movelist::movelist(const std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> &moves_) : moves(moves_) {}
+movelist::movelist(std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> &&moves_) : moves(std::move(moves_)) {}
+
 board parse_fen(const std::string &fen){ //TODO: string_view
 	const std::vector<std::string> content = split(fen, ' ');
 	assert(content.size() >= 4 && content.size() <= 6);
@@ -45,18 +87,18 @@ board parse_fen(const std::string &fen){ //TODO: string_view
 			else {
 				assert(at < BOARD_WIDTH);
 				switch(x) {
-					case 'k': ret.squares[i][at] = KING | WHITE; break;
-					case 'K': ret.squares[i][at] = KING | BLACK; break;
-					case 'q': ret.squares[i][at] = QUEEN | WHITE; break;
-					case 'Q': ret.squares[i][at] = QUEEN | BLACK; break;
-					case 'r': ret.squares[i][at] = ROOK | WHITE; break;
-					case 'R': ret.squares[i][at] = ROOK | BLACK; break;
-					case 'b': ret.squares[i][at] = BISHOP | WHITE; break;
-					case 'B': ret.squares[i][at] = BISHOP | BLACK; break;
-					case 'n': ret.squares[i][at] = KNIGHT | WHITE; break;
-					case 'N': ret.squares[i][at] = KNIGHT | BLACK; break;
-					case 'p': ret.squares[i][at] = PAWN | WHITE; break;
-					case 'P': ret.squares[i][at] = PAWN | BLACK; break;
+					case 'k': ret.squares[i][at] = KING | BLACK; break;
+					case 'K': ret.squares[i][at] = KING | WHITE; break;
+					case 'q': ret.squares[i][at] = QUEEN | BLACK; break;
+					case 'Q': ret.squares[i][at] = QUEEN | WHITE; break;
+					case 'r': ret.squares[i][at] = ROOK | BLACK; break;
+					case 'R': ret.squares[i][at] = ROOK | WHITE; break;
+					case 'b': ret.squares[i][at] = BISHOP | BLACK; break;
+					case 'B': ret.squares[i][at] = BISHOP | WHITE; break;
+					case 'n': ret.squares[i][at] = KNIGHT | BLACK; break;
+					case 'N': ret.squares[i][at] = KNIGHT | WHITE; break;
+					case 'p': ret.squares[i][at] = PAWN | BLACK; break;
+					case 'P': ret.squares[i][at] = PAWN | WHITE; break;
 					default: assert(false);
 				}
 				at++;
@@ -92,12 +134,365 @@ board parse_fen(const std::string &fen){ //TODO: string_view
 	return ret;
 }
 
+int dice_roll::encode() const {
+	int ret = 0;
+	for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
+		ret += count[i] * power(DICE_COUNT + 1, i);
+	}
+	return ret;
+}
+
+dice_roll dice_roll::decode(int x) {
+	dice_roll ret;
+	for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
+		ret.count[i] = x % (DICE_COUNT + 1);
+		x /= DICE_COUNT + 1;
+	}
+	return ret;
+}
+
+int dice_roll::total_rolls() const {
+	int ans = 0;
+	for (int x : this->count) ans += x;
+	return ans;
+}
+
+const std::vector <board> &movelist::get_moves(const dice_roll &x) const {
+	return this->moves[x.encode()];
+}
+
+std::ostream &operator<<(std::ostream &o, const dice_roll &dice) {
+	bool any = false;
+	for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
+		for (size_t j = 0; j < dice.count[i]; ++j) {
+			any = true;
+			o << piece_strings[i];
+		}
+	}
+	if (!any) o << "---";
+	return o;
+}
+
+dice_roll dice_roll::append(uint8_t piece) const {
+	dice_roll ret = *this;
+	ret.count[(piece - 1) / 2]++;
+	return ret;
+}
+
+movelist board::generate_moves() const {
+	uint8_t current_enpassant_mask = this->en_passant_mask, current_to_move = this->to_move;
+	std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> moves;
+	std::array<bool, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> king_capture_found;
+	moves[0].push_back(*this);
+	moves[0][0].en_passant_mask = 0;
+	moves[0][0].to_move ^= 1;
+
+
+	auto mark_king_capture_rec = [&](const dice_roll &x, auto &self) -> void {
+		assert(x.total_rolls() >= 1);
+		if (king_capture_found[x.encode()]) return;
+		king_capture_found[x.encode()] = true;
+		moves[x.encode()].clear();
+		if (x.total_rolls() < DICE_COUNT)
+			for (uint8_t piece : PIECE_TYPES)
+				self(x.append(piece), self);
+	};
+
+	auto mark_king_capture = [&](const dice_roll &x) {
+		mark_king_capture_rec(x, mark_king_capture_rec);
+	};
+
+	
+
+	auto go_line = [&](int start_x, int start_y, int dir_x, int dir_y, const board &b, std::vector<board> &destination, const dice_roll &destination_dice_roll) -> bool {
+		for (int i = 1; ; ++i) {
+			int new_x = start_x + dir_x * i, new_y = start_y + dir_y * i;
+			if (new_x < 0 || new_x >= BOARD_WIDTH || new_y < 0 || new_y >= BOARD_HEIGHT) break;
+			if (b.squares[new_x][new_y] == make_piece(KING, opponent(current_to_move))) {
+				mark_king_capture(destination_dice_roll);
+				return true;
+			}
+			if (is_empty(b.squares[new_x][new_y]) || is_players(b.squares[new_x][new_y], opponent(current_to_move))) {
+				board new_board = b;
+				new_board.move_piece(start_x, start_y, new_x, new_y);
+				destination.push_back(new_board);
+			}
+			if (!is_empty(b.squares[new_x][new_y])) break;
+		}
+		return false;
+	};
+
+	auto go_one = [&](int start_x, int start_y, int dir_x, int dir_y, const board &b, std::vector<board> &destination, const dice_roll &destination_dice_roll) -> bool {
+		int new_x = start_x + dir_x, new_y = start_y + dir_y;
+		if (new_x < 0 || new_x >= BOARD_WIDTH || new_y < 0 || new_y >= BOARD_HEIGHT) return false;
+		if (b.squares[new_x][new_y] == make_piece(KING, opponent(current_to_move))) {
+			mark_king_capture(destination_dice_roll);
+			return true;
+		}
+		if (is_empty(b.squares[new_x][new_y]) || is_players(b.squares[new_x][new_y], opponent(current_to_move))) {
+			board new_board = b;
+			new_board.move_piece(start_x, start_y, new_x, new_y);
+			// std::cerr << "Make move using go_one, reaching:\n";
+			// new_board.dump(std::cerr);
+			destination.push_back(new_board);
+		}
+		return false;
+	};
+
+	auto go_one_pawn_forward = [&](int start_x, int start_y, int dir_x, int dir_y, const board &b, std::vector<board> &destination, bool is_double_step, uint8_t promote_to) -> bool {
+		int new_x = start_x + dir_x, new_y = start_y + dir_y;
+		if (new_x < 0 || new_x >= BOARD_WIDTH || new_y < 0 || new_y >= BOARD_HEIGHT) return false;
+		int opp_en_passant_rank = current_to_move == WHITE ? 3 : 4;
+		if (is_empty(b.squares[new_x][new_y])) {
+			board new_board = b;
+			new_board.clear_square(start_x, start_y);
+			new_board.put_piece(new_x, new_y, make_piece(promote_to, current_to_move));
+			if (is_double_step) new_board.add_en_passant(start_y);
+			if (start_x == opp_en_passant_rank) new_board.remove_en_passant(start_y);
+			destination.push_back(new_board);
+		}
+		return false;
+	};
+
+	auto go_one_pawn_diagonally = [&](int start_x, int start_y, int dir_x, int dir_y, const board &b, std::vector<board> &destination, const dice_roll &destination_dice_roll, uint8_t promote_to) -> bool {
+		int new_x = start_x + dir_x, new_y = start_y + dir_y;
+		int en_passant_rank = current_to_move == WHITE ? 4 : 3;
+		int opp_en_passant_rank = current_to_move == WHITE ? 3 : 4;
+		if (new_x < 0 || new_x >= BOARD_WIDTH || new_y < 0 || new_y >= BOARD_HEIGHT) return false;
+		if (b.squares[new_x][new_y] == make_piece(KING, opponent(current_to_move))) {
+			mark_king_capture(destination_dice_roll);
+			return true;
+		}
+		if (!is_empty(b.squares[new_x][new_y]) && is_players(b.squares[new_x][new_y], opponent(current_to_move))) {
+			board new_board = b;
+			new_board.clear_square(start_x, start_y);
+			new_board.put_piece(new_x, new_y, make_piece(promote_to, current_to_move));
+			if (start_x == opp_en_passant_rank) new_board.remove_en_passant(start_y);
+			destination.push_back(new_board);
+		}
+		else if (start_y == en_passant_rank && ((current_enpassant_mask >> new_x) & 1) && b.squares[new_x][start_y] == make_piece(PAWN, opponent(current_to_move))) {
+			board new_board = b;
+			new_board.clear_square(start_x, start_y);
+			new_board.put_piece(new_x, new_y, make_piece(promote_to, current_to_move));
+			new_board.clear_square(new_x, start_y);
+			destination.push_back(new_board);
+		}
+		return false;
+	};
+
+
+
+	for (size_t dice_roll_id = 0; dice_roll_id < power(DICE_COUNT + 1, PIECES_TYPES_COUNT) ; ++dice_roll_id) {
+		dice_roll current = dice_roll::decode(dice_roll_id);
+		if (current.total_rolls() >= DICE_COUNT) continue;
+		std::sort(moves[dice_roll_id].begin(), moves[dice_roll_id].end());
+		moves[dice_roll_id].erase(std::unique(moves[dice_roll_id].begin(), moves[dice_roll_id].end()), moves[dice_roll_id].end());
+		// std::cerr << "Process " << current << ", having " << moves[dice_roll_id].size() << " different positions\n";
+		for (const board &current_board : moves[dice_roll_id]) {
+			// std::cerr << "go with :\n";
+			// current_board.dump(std::cerr);
+			for (size_t i = 0; i < BOARD_WIDTH ; ++i) for (size_t j = 0; j < BOARD_HEIGHT; ++j) {
+				if (is_empty(current_board.squares[i][j]) || !is_players(current_board.squares[i][j], current_to_move)) continue;
+				dice_roll destination_dice_roll = current.append(current_board.squares[i][j]);
+				size_t new_index = destination_dice_roll.encode();
+				std::vector<board> &destination = moves[new_index];
+				bool capture_found = king_capture_found[new_index];
+				auto process_line_piece = [&](const std::vector<std::pair <int, int> > &dirs) -> void {
+					if (capture_found) return;
+					for (auto [dx, dy] : dirs) if (go_line(i, j, dx, dy, current_board, destination, destination_dice_roll)) return;
+				};
+				auto process_hopping_piece = [&](const std::vector<std::pair <int, int> > &dirs) -> void {
+					if (capture_found) return;
+					for (auto [dx, dy] : dirs) if (go_one(i, j, dx, dy, current_board, destination, destination_dice_roll)) return;
+				};
+				auto process_pawn = [&]() -> void {
+					if (capture_found) return;
+					assert(i != 0 && i != 7);
+					size_t go_dir = current_to_move == WHITE ? 1 : -1;
+					size_t promote_from_rank = current_to_move == WHITE ? 6 : 1;
+					size_t double_step_from_rank = current_to_move == WHITE ? 1 : 6;
+					if (i == promote_from_rank) {
+						for (char promote_to : promotions)
+							if (go_one_pawn_forward(i, j, go_dir, 0, current_board, destination, false, promote_to)) return;
+					}
+					else {
+						if (go_one_pawn_forward(i, j, go_dir, 0, current_board, destination, false, PAWN)) return;
+						if (i == double_step_from_rank && is_empty(current_board.squares[i + go_dir][j]))
+							if (go_one_pawn_forward(i, j, go_dir * 2, 0, current_board, destination, true, PAWN))
+								return;
+					}
+					if (i == promote_from_rank) {
+						for (char promote_to : promotions) {
+							for (int capture_dir : {-1, 1})
+								if (go_one_pawn_diagonally(i, j, go_dir, capture_dir, current_board, destination, destination_dice_roll, promote_to))
+									return;
+						}
+					}
+					else {
+						for (int capture_dir : {-1, 1})
+							if (go_one_pawn_diagonally(i, j, go_dir, capture_dir, current_board, destination, destination_dice_roll, PAWN))
+								return;
+					}
+				};
+				if (current_board.squares[i][j] == make_piece(KING, current_to_move)) {
+					// std::cerr << "Found a king\n";
+					process_hopping_piece({{0, 1}, {0, -1}, {1, -1}, {1, 0}, {1, 1}, {-1, -1}, {-1, 0}, {-1, 1}});
+				}
+				else if (current_board.squares[i][j] == make_piece(QUEEN, current_to_move)) {
+					// std::cerr << "Found a queen\n";
+					process_line_piece({{0, 1}, {0, -1}, {1, -1}, {1, 0}, {1, 1}, {-1, -1}, {-1, 0}, {-1, 1}});
+				}
+				else if (current_board.squares[i][j] == make_piece(ROOK, current_to_move)) {
+					// std::cerr << "Found a rook\n";
+					process_line_piece({{0, 1}, {0, -1}, {1, 0}, {-1, 0}});
+				}
+				else if (current_board.squares[i][j] == make_piece(BISHOP, current_to_move)) {
+					// std::cerr << "Found a bishop\n";
+					process_line_piece({{1, 1}, {1, -1}, {-1, 1}, {-1, -1}});
+				}
+				else if (current_board.squares[i][j] == make_piece(KNIGHT, current_to_move)) {
+					// std::cerr << "Found a knight\n";
+					process_hopping_piece({{1, 2}, {2, 1}, {1, -2}, {2, -1}, {-1, 2}, {-2, 1}, {-1, -2}, {-2, -1}, });
+				}
+				else if (current_board.squares[i][j] == make_piece(PAWN, current_to_move)) {
+					// std::cerr << "Found a pawn\n";
+					process_pawn();
+				}
+			}
+			if (current.total_rolls() + 2 <= DICE_COUNT) { //Do castling
+				size_t new_index = current.append(KING).append(ROOK).encode();
+				std::vector<board> &destination = moves[new_index];
+				bool capture_found = king_capture_found[new_index];
+				if (!capture_found) {
+					if (current_to_move == WHITE) {
+						if (current_board.castling_mask & WHITE_KINGSIDE_CASTLE) {
+							if (is_empty(current_board.squares[5][0]) && is_empty(current_board.squares[6][0])) {
+								board new_board = current_board;
+								new_board.move_piece(4, 0, 6, 0);
+								new_board.move_piece(7, 0, 5, 0);
+								destination.push_back(new_board);
+							}
+						}
+						if (current_board.castling_mask & WHITE_QUEENSIDE_CASTLE) {
+							if (is_empty(current_board.squares[3][0]) && is_empty(current_board.squares[2][0]) && is_empty(current_board.squares[1][0])) {
+								board new_board = current_board;
+								new_board.move_piece(4, 0, 2, 0);
+								new_board.move_piece(0, 0, 3, 0);
+								destination.push_back(new_board);
+							}
+						}
+					}
+					else {
+						if (current_board.castling_mask & WHITE_KINGSIDE_CASTLE) {
+							if (is_empty(current_board.squares[5][7]) && is_empty(current_board.squares[6][7])) {
+								board new_board = current_board;
+								new_board.move_piece(4, 7, 6, 7);
+								new_board.move_piece(7, 7, 5, 7);
+								destination.push_back(new_board);
+							}
+						}
+						if (current_board.castling_mask & WHITE_QUEENSIDE_CASTLE) {
+							if (is_empty(current_board.squares[3][7]) && is_empty(current_board.squares[2][7]) && is_empty(current_board.squares[1][7])) {
+								board new_board = current_board;
+								new_board.move_piece(4, 7, 2, 7);
+								new_board.move_piece(7, 7, 3, 7);
+								destination.push_back(new_board);
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	for (size_t dice_roll_id = 0; dice_roll_id < power(DICE_COUNT + 1, PIECES_TYPES_COUNT) ; ++dice_roll_id) {
+		dice_roll current = dice_roll::decode(dice_roll_id);
+		if (current.total_rolls() == DICE_COUNT) {
+			std::sort(moves[dice_roll_id].begin(), moves[dice_roll_id].end());
+			moves[dice_roll_id].erase(std::unique(moves[dice_roll_id].begin(), moves[dice_roll_id].end()), moves[dice_roll_id].end());
+		}
+	}
+	for (int dice_roll_id = power(DICE_COUNT + 1, PIECES_TYPES_COUNT); dice_roll_id >= 0; --dice_roll_id) {
+		dice_roll current = dice_roll::decode(dice_roll_id);
+		if (current.total_rolls() > DICE_COUNT) continue;
+		if (king_capture_found[current.encode()]) continue;
+		std::vector<board> &current_moves = moves[current.encode()];
+		if (!current_moves.empty()) continue;
+		std::cerr << "No moves found for exactly " << current << ", searching subsets\n";
+		size_t current_total = current.total_rolls();
+		bool found_any = false;
+		std::vector<dice_roll> strict_subsets = current.strict_subsets();
+		for (int i = current_total - 1; i >= 0; --i) {
+			std::cerr << "Trying to make exactly " << i << ", moves\n";
+			for (const dice_roll &subset : strict_subsets) {
+				if (subset.total_rolls() == i) {
+					std::cerr << "Testing " << subset << "\n";
+					assert(!king_capture_found[subset.encode()]);
+					if (!moves[subset.encode()].empty()) {
+						std::cerr << "Is nonempty\n";
+						found_any = true;
+						current_moves.insert(current_moves.end(), moves[subset.encode()].begin(), moves[subset.encode()].end());
+					}
+				}
+			}
+			if (found_any) break;
+		}
+		assert(!current_moves.empty());
+	}
+
+	return moves;
+}
+
+std::vector<dice_roll> make_rolls_with(int low, int high) {
+	std::vector<dice_roll> ret;
+	for (int i = 0; i < power(DICE_COUNT + 1, PIECES_TYPES_COUNT); ++i) {
+		dice_roll current = dice_roll::decode(i);
+		if (current.total_rolls() >= low && current.total_rolls() <= high)
+			ret.push_back(current);
+	}
+	return ret;
+}
+	
+void board::touch_castling(int x, int y) {
+	if (x == 0) {
+		if (y == 0) this->castling_mask &=~ WHITE_QUEENSIDE_CASTLE;
+		if (y == 4) this->castling_mask &=~ (WHITE_QUEENSIDE_CASTLE | WHITE_KINGSIDE_CASTLE);
+		if (y == 7) this->castling_mask &=~ WHITE_KINGSIDE_CASTLE;
+	}
+	if (x == 7) {
+		if (y == 0) this->castling_mask &=~ BLACK_QUEENSIDE_CASTLE;
+		if (y == 4) this->castling_mask &=~ (BLACK_QUEENSIDE_CASTLE | BLACK_KINGSIDE_CASTLE);
+		if (y == 7) this->castling_mask &=~ BLACK_KINGSIDE_CASTLE;
+	}
+}
+
+void board::add_en_passant(int x) {
+	this->en_passant_mask |= (1 << x);
+}
+void board::remove_en_passant(int x) {
+	this->en_passant_mask &=~ (1 << x);
+}
+
+void board::move_piece(int from_x, int from_y, int to_x, int to_y) {
+	touch_castling(from_x, from_y);
+	touch_castling(to_x, to_y);
+	this->squares[to_x][to_y] = this->squares[from_x][from_y];
+	this->squares[from_x][from_y] = EMPTY;
+}
+void board::clear_square(int x, int y) {
+	touch_castling(x, y); //TODO: this can be optimized sometimes, you're not depriving anyone of castling after an en-passant for example
+	this->squares[x][y] = EMPTY;
+}
+void board::put_piece(int x, int y, uint8_t piece) {
+	touch_castling(x, y);
+	this->squares[x][y] = piece;
+}
+
 void board::dump(std::ostream &o) const {
 	for (int i = BOARD_HEIGHT - 1; i >= 0; --i) {
 		for (int j = 0; j < BOARD_WIDTH; ++j) {
 			o << square_colors[(i + j) % 2];
 			if (is_empty(squares[i][j])) o << "  ";
-			else o << piece_colors[get_player(squares[i][j])] << get_piece_string(squares[i][j]) << " ";
+			else o << piece_colors[get_player(squares[i][j])] << get_piece_image(squares[i][j]) << " ";
 			o << reset_colors;
 		}
 		o << "\n";
@@ -118,4 +513,33 @@ void board::dump(std::ostream &o) const {
 		for (int i = 0; i < BOARD_WIDTH; ++i) if (en_passant_mask >> i & 1) o << (char)('a' + i);
 	}
 	o << "\n";
+}
+
+void bulk_dump_boards(const std::vector<board> &boards, std::ostream &o) {
+	const size_t CHUNK = 11, SPOT_WIDTH = 21;
+	auto go = [&](size_t begin, size_t end) {
+		std::vector<std::vector<std::string> > rows;
+		for (size_t i = begin; i < end; ++i) {
+			std::stringstream s;
+			boards[i].dump(s);
+			rows.push_back(split(s.str(), '\n'));
+			assert(rows.back().size() == (size_t)(4 + BOARD_HEIGHT));
+			assert(rows.back().back().empty());
+		}
+		for (size_t i = 0; i < BOARD_HEIGHT; ++i) {
+			for (auto &b : rows) {
+				o << b[i] << std::string(SPOT_WIDTH - 2 * BOARD_WIDTH, ' ');
+			}
+			o << "\n";
+		}
+		for (size_t i = BOARD_HEIGHT; i < BOARD_HEIGHT + 3; ++i) {
+			for (auto &b : rows) {
+				o << std::left << std::setw(SPOT_WIDTH) << b[i];
+			}
+			o << "\n";
+		}
+	};
+	for (size_t i = 0; i < boards.size(); i += CHUNK) {
+		go(i, std::min(i + CHUNK, boards.size()));
+	}
 }
