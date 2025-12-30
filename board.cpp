@@ -32,6 +32,7 @@ std::vector<std::string> split(const std::string& str, char delimiter) { //TODO:
 	return tokens;
 }
 
+
 std::vector <dice_roll> dice_roll::strict_subsets() const {
 	std::vector<dice_roll> ret;
 	dice_roll oth = *this;
@@ -66,6 +67,42 @@ std::vector <dice_roll> dice_roll::strict_subsets() const {
 movelist::movelist(const std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> &moves_) : moves(moves_) {}
 movelist::movelist(std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> &&moves_) : moves(std::move(moves_)) {}
 
+int movelist::count_winning_on_the_spot() const {
+	int ret = 0;
+	for (auto &dice : full_dice_rolls) {
+		if (this->get_moves(dice).empty()) {
+			ret += dice.combinations();
+		}
+	}
+	return ret;
+}
+
+uint8_t board::get_to_move() const {
+	return this->to_move;
+}
+
+dice_roll dice_roll::roll(std::mt19937 &rng) {
+	dice_roll ret = {};
+	for (int _ = 0; _ < DICE_COUNT; ++_) {
+		ret.count[std::uniform_int_distribution(0, PIECES_TYPES_COUNT - 1)(rng)]++;
+	}
+	return ret;
+}
+
+dice_roll parse_dice_roll(const std::string &s) {
+	dice_roll ret = {};
+	for (char x : s) {
+		bool found = false;
+		for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
+			if (std::string(1, x) == piece_strings[i]) {
+				ret.count[i]++;
+				found = true;
+			}
+		}
+		assert(found);
+	}
+	return ret;
+}
 board parse_fen(const std::string &fen){ //TODO: string_view
 	const std::vector<std::string> content = split(fen, ' ');
 	assert(content.size() >= 4 && content.size() <= 6);
@@ -134,6 +171,55 @@ board parse_fen(const std::string &fen){ //TODO: string_view
 	return ret;
 }
 
+std::string board::fen() const {
+	std::stringstream ret;
+	for (int i = BOARD_HEIGHT - 1; i >= 0; --i) {
+		int current_blank = 0;
+		auto push_char = [&](char x){
+			if (current_blank) ret << current_blank;
+			current_blank = 0;
+			ret << x;
+		};
+		for (int j = 0; j < BOARD_WIDTH; ++j) {
+			switch(this->squares[i][j]) {
+				case make_piece(KING, WHITE): push_char('K'); break;
+				case make_piece(QUEEN, WHITE): push_char('Q'); break;
+				case make_piece(ROOK, WHITE): push_char('R'); break;
+				case make_piece(BISHOP, WHITE): push_char('B'); break;
+				case make_piece(KNIGHT, WHITE): push_char('N'); break;
+				case make_piece(PAWN, WHITE): push_char('P'); break;
+				case make_piece(KING, BLACK): push_char('k'); break;
+				case make_piece(QUEEN, BLACK): push_char('q'); break;
+				case make_piece(ROOK, BLACK): push_char('r'); break;
+				case make_piece(BISHOP, BLACK): push_char('b'); break;
+				case make_piece(KNIGHT, BLACK): push_char('n'); break;
+				case make_piece(PAWN, BLACK): push_char('p'); break;
+				case EMPTY: current_blank++; break;
+				default: assert(false); break; 
+			}
+		}
+		if (current_blank) ret << current_blank;
+		if (i) ret << "/";
+	}
+	ret << " " << (this->to_move == WHITE ? 'w' : 'b') << " ";
+	if (this->castling_mask & WHITE_KINGSIDE_CASTLE) ret << "K";
+	if (this->castling_mask & WHITE_QUEENSIDE_CASTLE) ret << "Q";
+	if (this->castling_mask & BLACK_KINGSIDE_CASTLE) ret << "k";
+	if (this->castling_mask & BLACK_QUEENSIDE_CASTLE) ret << "q";
+	if (!this->castling_mask) ret << "-";
+	ret << " ";
+	bool first = true;
+	for (int i = 0; i < BOARD_WIDTH; ++i) {
+		if (this->en_passant_mask >> i & 1) {
+			if (!first) ret << ",";
+			first = false;
+			ret << (char)('a' + i) << (this->to_move == BLACK ? '3' : '6');
+		}
+	}
+	if (!this->en_passant_mask) ret << "-";
+	return ret.str();
+}
+
 int dice_roll::encode() const {
 	int ret = 0;
 	for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
@@ -157,6 +243,17 @@ int dice_roll::total_rolls() const {
 	return ans;
 }
 
+int dice_roll::combinations() const {
+	int denominator = 1, total = 0;
+	for (int x : this->count) {
+		for (int i = 2; i <= x; ++i) denominator *= i;
+		total += x;
+	}
+	int numerator = 1;
+	for (int i = 2; i <= total; ++i) numerator *= i;
+	return numerator / denominator;
+}
+
 const std::vector <board> &movelist::get_moves(const dice_roll &x) const {
 	return this->moves[x.encode()];
 }
@@ -175,14 +272,14 @@ std::ostream &operator<<(std::ostream &o, const dice_roll &dice) {
 
 dice_roll dice_roll::append(uint8_t piece) const {
 	dice_roll ret = *this;
-	ret.count[(piece - 1) / 2]++;
+	ret.count[piece / 2 - 1]++;
 	return ret;
 }
 
 movelist board::generate_moves() const {
 	uint8_t current_enpassant_mask = this->en_passant_mask, current_to_move = this->to_move;
 	std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> moves;
-	std::array<bool, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> king_capture_found;
+	std::array<bool, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> king_capture_found = {};
 	moves[0].push_back(*this);
 	moves[0][0].en_passant_mask = 0;
 	moves[0][0].to_move ^= 1;
@@ -192,6 +289,7 @@ movelist board::generate_moves() const {
 		assert(x.total_rolls() >= 1);
 		if (king_capture_found[x.encode()]) return;
 		king_capture_found[x.encode()] = true;
+		// std::cerr << "Can capture the king with " << x << "\n";
 		moves[x.encode()].clear();
 		if (x.total_rolls() < DICE_COUNT)
 			for (uint8_t piece : PIECE_TYPES)
@@ -270,11 +368,11 @@ movelist board::generate_moves() const {
 			if (start_x == opp_en_passant_rank) new_board.remove_en_passant(start_y);
 			destination.push_back(new_board);
 		}
-		else if (start_y == en_passant_rank && ((current_enpassant_mask >> new_x) & 1) && b.squares[new_x][start_y] == make_piece(PAWN, opponent(current_to_move))) {
+		else if (start_x == en_passant_rank && ((current_enpassant_mask >> new_y) & 1) && b.squares[start_x][new_y] == make_piece(PAWN, opponent(current_to_move)) && is_empty(b.squares[new_x][new_y])) {
 			board new_board = b;
 			new_board.clear_square(start_x, start_y);
 			new_board.put_piece(new_x, new_y, make_piece(promote_to, current_to_move));
-			new_board.clear_square(new_x, start_y);
+			new_board.clear_square(start_x, new_y);
 			destination.push_back(new_board);
 		}
 		return false;
@@ -366,36 +464,36 @@ movelist board::generate_moves() const {
 				if (!capture_found) {
 					if (current_to_move == WHITE) {
 						if (current_board.castling_mask & WHITE_KINGSIDE_CASTLE) {
-							if (is_empty(current_board.squares[5][0]) && is_empty(current_board.squares[6][0])) {
+							if (is_empty(current_board.squares[0][5]) && is_empty(current_board.squares[0][6])) {
 								board new_board = current_board;
-								new_board.move_piece(4, 0, 6, 0);
-								new_board.move_piece(7, 0, 5, 0);
+								new_board.move_piece(0, 4, 0, 6);
+								new_board.move_piece(0, 7, 0, 5);
 								destination.push_back(new_board);
 							}
 						}
 						if (current_board.castling_mask & WHITE_QUEENSIDE_CASTLE) {
-							if (is_empty(current_board.squares[3][0]) && is_empty(current_board.squares[2][0]) && is_empty(current_board.squares[1][0])) {
+							if (is_empty(current_board.squares[0][3]) && is_empty(current_board.squares[0][2]) && is_empty(current_board.squares[0][1])) {
 								board new_board = current_board;
-								new_board.move_piece(4, 0, 2, 0);
-								new_board.move_piece(0, 0, 3, 0);
+								new_board.move_piece(0, 4, 0, 2);
+								new_board.move_piece(0, 0, 0, 3);
 								destination.push_back(new_board);
 							}
 						}
 					}
 					else {
 						if (current_board.castling_mask & WHITE_KINGSIDE_CASTLE) {
-							if (is_empty(current_board.squares[5][7]) && is_empty(current_board.squares[6][7])) {
+							if (is_empty(current_board.squares[7][5]) && is_empty(current_board.squares[7][6])) {
 								board new_board = current_board;
-								new_board.move_piece(4, 7, 6, 7);
-								new_board.move_piece(7, 7, 5, 7);
+								new_board.move_piece(7, 4, 7, 6);
+								new_board.move_piece(7, 7, 7, 5);
 								destination.push_back(new_board);
 							}
 						}
-						if (current_board.castling_mask & WHITE_QUEENSIDE_CASTLE) {
-							if (is_empty(current_board.squares[3][7]) && is_empty(current_board.squares[2][7]) && is_empty(current_board.squares[1][7])) {
+						if (current_board.castling_mask & BLACK_QUEENSIDE_CASTLE) {
+							if (is_empty(current_board.squares[7][3]) && is_empty(current_board.squares[7][2]) && is_empty(current_board.squares[7][1])) {
 								board new_board = current_board;
-								new_board.move_piece(4, 7, 2, 7);
-								new_board.move_piece(7, 7, 3, 7);
+								new_board.move_piece(7, 4, 7, 2);
+								new_board.move_piece(7, 0, 7, 3);
 								destination.push_back(new_board);
 							}
 						}
@@ -413,22 +511,29 @@ movelist board::generate_moves() const {
 	}
 	for (int dice_roll_id = power(DICE_COUNT + 1, PIECES_TYPES_COUNT); dice_roll_id >= 0; --dice_roll_id) {
 		dice_roll current = dice_roll::decode(dice_roll_id);
-		if (current.total_rolls() > DICE_COUNT) continue;
-		if (king_capture_found[current.encode()]) continue;
+		// std::cerr << "Examine " << current << " (dice_roll_id = " << dice_roll_id << ")\n";
+		if (current.total_rolls() > DICE_COUNT) {
+			// std::cerr << "too big, continue\n";
+			continue;
+		}
+		if (king_capture_found[current.encode()]) {
+			// std::cerr << "Can capture the king with it\n";
+			continue;
+		}
 		std::vector<board> &current_moves = moves[current.encode()];
 		if (!current_moves.empty()) continue;
-		std::cerr << "No moves found for exactly " << current << ", searching subsets\n";
+		// std::cerr << "No moves found for exactly " << current << ", searching subsets\n";
 		size_t current_total = current.total_rolls();
 		bool found_any = false;
 		std::vector<dice_roll> strict_subsets = current.strict_subsets();
 		for (int i = current_total - 1; i >= 0; --i) {
-			std::cerr << "Trying to make exactly " << i << ", moves\n";
+			// std::cerr << "Trying to make exactly " << i << ", moves\n";
 			for (const dice_roll &subset : strict_subsets) {
 				if (subset.total_rolls() == i) {
-					std::cerr << "Testing " << subset << "\n";
+					// std::cerr << "Testing " << subset << "\n";
 					assert(!king_capture_found[subset.encode()]);
 					if (!moves[subset.encode()].empty()) {
-						std::cerr << "Is nonempty\n";
+						// std::cerr << "Is nonempty\n";
 						found_any = true;
 						current_moves.insert(current_moves.end(), moves[subset.encode()].begin(), moves[subset.encode()].end());
 					}

@@ -4,6 +4,7 @@
 #include <ostream>
 #include <vector>
 #include <string>
+#include <random>
 const int PIECES_TYPES_COUNT = 6, DICE_COUNT = 3;
 const int BOARD_WIDTH = 8, BOARD_HEIGHT = 8;
 const uint8_t EMPTY = 0, WHITE = 0, BLACK = 1, PAWN = 2, KNIGHT = 4, BISHOP = 6, ROOK = 8, QUEEN = 10, KING = 12;
@@ -28,6 +29,8 @@ constexpr int power(int base, int exponent) {
 	return exponent == 0 ? 1 : base * power(base, exponent - 1);
 }
 
+const int OMEGA = power(PIECES_TYPES_COUNT, DICE_COUNT);
+
 constexpr uint8_t opponent(uint8_t x) {return x ^ 1;}
 
 class dice_roll {
@@ -39,7 +42,11 @@ public:
 	dice_roll append(uint8_t piece) const;
 	std::vector<dice_roll> strict_subsets() const;
 	dice_roll& operator=(const dice_roll& other) = default;
+	int combinations() const;
+	static dice_roll roll(std::mt19937 &rng);
 };
+
+dice_roll parse_dice_roll(const std::string &s);
 
 std::vector<dice_roll> make_rolls_with(int low, int high);
 
@@ -57,6 +64,7 @@ public:
 	movelist(std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> &&moves_);
 	const std::vector<board>& get_moves(const dice_roll &x) const; //Keep as a separate class so can be done lazily or anything alike in the future, probably replace to return some wrapper around possibly multiple vectors
 																																 //(use when there's no way to move all 3 pieces, but there are some to move a subset and those strict_subsets can be only stored once)
+	int count_winning_on_the_spot() const;
 };
 
 using square_t = uint8_t;
@@ -81,6 +89,8 @@ public:
 	void dump(std::ostream &o) const;
 	friend board parse_fen(const std::string &x);
 	auto operator<=>(const board &oth) const = default;
+	std::string fen() const;
+	uint8_t get_to_move() const;
 };
 
 
