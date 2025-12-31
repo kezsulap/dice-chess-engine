@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include "output_operators.hpp"
 
 std::string get_piece_image(uint8_t x) {
@@ -619,9 +620,25 @@ void board::dump(std::ostream &o) const {
 	}
 	o << "\n";
 }
+std::string exec(const char* cmd) {
+	std::array<char, 128> buffer;
+	std::string result;
+	std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+	if (!pipe) {
+		throw std::runtime_error("popen() failed!");
+	}
+	while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) != nullptr) {
+		result += buffer.data();
+	}
+	return result;
+}
+int get_screen_width() {
+	std::string x = exec("/usr/bin/tput cols");
+	return std::stoi(x);
+}
 
 void bulk_dump_boards(const std::vector<board> &boards, std::ostream &o) {
-	const size_t CHUNK = 11, SPOT_WIDTH = 21;
+	const size_t SPOT_WIDTH = 21, CHUNK = get_screen_width() / SPOT_WIDTH;
 	auto go = [&](size_t begin, size_t end) {
 		std::vector<std::vector<std::string> > rows;
 		for (size_t i = begin; i < end; ++i) {
