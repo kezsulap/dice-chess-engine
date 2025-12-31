@@ -104,6 +104,21 @@ dice_roll parse_dice_roll(const std::string &s) {
 	}
 	return ret;
 }
+
+
+void board::flip_in_place() {
+	reverse(squares.begin(), squares.end());
+	to_move ^= 1;
+	for (auto &row : squares) for (auto &square : row) if (!is_empty(square)) square ^= 1;
+	castling_mask = (castling_mask >> 2 | castling_mask << 2) & 0xf;
+}
+
+board board::flip() const {
+	board ret = *this;
+	ret.flip_in_place();
+	return ret;
+}
+
 board parse_fen(const std::string &fen){ //TODO: string_view
 	const std::vector<std::string> content = split(fen, ' ');
 	assert(content.size() >= 4 && content.size() <= 6);
@@ -482,7 +497,7 @@ movelist board::generate_moves() const {
 						}
 					}
 					else {
-						if (current_board.castling_mask & WHITE_KINGSIDE_CASTLE) {
+						if (current_board.castling_mask & BLACK_KINGSIDE_CASTLE) {
 							if (is_empty(current_board.squares[7][5]) && is_empty(current_board.squares[7][6])) {
 								board new_board = current_board;
 								new_board.move_piece(7, 4, 7, 6);

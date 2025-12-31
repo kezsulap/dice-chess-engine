@@ -99,6 +99,8 @@ public:
 	auto operator<=>(const board &oth) const = default;
 	std::string fen() const;
 	uint8_t get_to_move() const;
+	void flip_in_place();
+	board flip() const;
 };
 
 
