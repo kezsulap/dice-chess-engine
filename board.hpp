@@ -105,4 +105,5 @@ public:
 
 
 void bulk_dump_boards(const std::vector<board> &, std::ostream &o);
+void bulk_dump_boards_with_annotations(const std::vector<board> &boards, const std::vector<std::string> &annotations, std::ostream &o);
 

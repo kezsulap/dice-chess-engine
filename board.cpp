@@ -680,3 +680,45 @@ void bulk_dump_boards(const std::vector<board> &boards, std::ostream &o) {
 		go(i, std::min(i + CHUNK, boards.size()));
 	}
 }
+
+void bulk_dump_boards_with_annotations(const std::vector<board> &boards, const std::vector<std::string> &annotations, std::ostream &o) {
+	assert(boards.size() == annotations.size());
+	const size_t MIN_WIDTH = 21, SCREEN_WIDTH = get_screen_width();
+	std::vector<std::vector<std::string> > rows;
+	std::vector<size_t> max_width;
+	for (size_t i = 0; i < boards.size(); ++i) {
+		std::stringstream s;
+		boards[i].dump(s);
+		s << annotations[i];
+		rows.push_back(split(s.str(), '\n'));
+		size_t longest = MIN_WIDTH;
+		for (size_t j = BOARD_HEIGHT; j < rows[i].size(); ++j)
+			longest = std::max(longest, rows[i][j].size());
+		max_width.push_back(longest);
+	}
+	for (size_t i = 0; i < boards.size(); ) {
+		size_t width_sum = 0;
+		size_t end = i;
+		while (end < boards.size() && width_sum + max_width[end] <= SCREEN_WIDTH) {
+			width_sum += max_width[end];
+			end++;
+		}
+		if (end == i) end++;
+		size_t max_rows = 0;
+		for (size_t j = i; j < end; ++j) max_rows = std::max(max_rows, rows[j].size());
+		for (size_t row = 0; row < max_rows; ++row) {
+			for (size_t j = i; j < end; ++j) {
+				if (row < rows[j].size()) {
+					o << rows[j][row];
+					if (row < BOARD_HEIGHT) o << std::string(max_width[j] - 2 * BOARD_WIDTH, ' ');
+					else o << std::string(max_width[j] - rows[j][row].size(), ' ');
+				}
+				else {
+					o << std::string(max_width[j], ' ');
+				}
+			}
+			o << "\n";
+		}
+		i = end;
+	}
+}

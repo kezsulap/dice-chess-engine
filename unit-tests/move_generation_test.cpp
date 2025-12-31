@@ -2,6 +2,9 @@
 #include "../board.hpp"
 #include <bits/stdc++.h>
 
+std::vector<board> passed_tests;
+std::vector<std::string> passed_tests_annotations;
+
 void ASSERT_MOVES_EQUAL(const std::string &fen, const std::string &dice_string, const std::vector<std::string> &expected_fens) {
 	for (bool flipped : {false, true}) {
 		dice_roll dice = parse_dice_roll(dice_string);
@@ -42,7 +45,7 @@ void ASSERT_MOVES_EQUAL(const std::string &fen, const std::string &dice_string, 
 				bulk_dump_boards(duplicated_boards, std::cerr);
 			}
 			std::cerr << RED << "Output containing " << got_moves.size() << " positions, expected " << expected_fens.size() << "\n" << CLEAR_COLOURS;
-			std::cerr << RED << "ASSERT_MOVES_EQUAL(\"" << fen << "\", \"" << dice_string << "\", {";
+			std::cerr << RED << "ASSERT_MOVES_EQUAL(\"" << (flipped ? b.fen() : fen) << "\", \"" << dice_string << "\", {";
 			bool first = true;
 			for (auto &x : got_moves) {
 				if (!first) std::cerr << ", ";
@@ -53,10 +56,16 @@ void ASSERT_MOVES_EQUAL(const std::string &fen, const std::string &dice_string, 
 			std::cerr << RED << "----------------------------------------------\n" << CLEAR_COLOURS;
 		}
 		else {
-			std::cerr << GREEN << "TEST generating boards for " << dice << " from position:\n" << CLEAR_COLOURS;
-			b.dump(std::cerr);
-			std::cerr << "Passed\n";
-			std::cerr << GREEN << "----------------------------------------------\n" << CLEAR_COLOURS;
+			// std::cerr << GREEN << "TEST generating boards for " << dice << " from position:\n" << CLEAR_COLOURS;
+			// b.dump(std::cerr);
+			// std::cerr << "Passed\n";
+			// std::cerr << GREEN << "----------------------------------------------\n" << CLEAR_COLOURS;
+			passed_tests.push_back(b);
+			std::stringstream s;
+			s << "Test for dice " << dice << "\n";
+			if (expected_boards.empty()) s << "King capture found\n";
+			else s << expected_boards.size() << " moves found\n";
+			passed_tests_annotations.push_back(s.str());
 		}
 	}
 }
@@ -332,4 +341,115 @@ int main() {
 		"8/8/8/8/8/8/3PPP2/R2K3k b - -",
 	});
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R1BQKB1R w KQkq - 0 1", "RRB", {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R1BQKB1R b Qkq - 0 1", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/R1BQKB1R b Kkq - 0 1", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/1RBQKBR1 b kq - 0 1"});
+	ASSERT_MOVES_EQUAL("8/8/8/8/8/8/3PPP2/1k2K2R w K - 0 1", "RRK", {});
+	ASSERT_MOVES_EQUAL("8/8/8/8/8/8/3PPP2/1k2K2R w - - 0 1", "RRK", {
+		"7R/8/8/8/8/8/3PPP2/1k3K2 b - -",
+		"6R1/8/8/8/8/8/3PPP2/1k3K2 b - -",
+		"5R2/8/8/8/8/8/3PPP2/1k3K2 b - -",
+		"4R3/8/8/8/8/8/3PPP2/1k3K2 b - -",
+		"3R4/8/8/8/8/8/3PPP2/1k3K2 b - -",
+		"2R5/8/8/8/8/8/3PPP2/1k3K2 b - -",
+		"1R6/8/8/8/8/8/3PPP2/1k3K2 b - -",
+		"R7/8/8/8/8/8/3PPP2/1k3K2 b - -",
+		"8/7R/8/8/8/8/3PPP2/1k3K2 b - -",
+		"8/6R1/8/8/8/8/3PPP2/1k3K2 b - -",
+		"8/5R2/8/8/8/8/3PPP2/1k3K2 b - -",
+		"8/4R3/8/8/8/8/3PPP2/1k3K2 b - -",
+		"8/3R4/8/8/8/8/3PPP2/1k3K2 b - -",
+		"8/2R5/8/8/8/8/3PPP2/1k3K2 b - -",
+		"8/1R6/8/8/8/8/3PPP2/1k3K2 b - -",
+		"8/R7/8/8/8/8/3PPP2/1k3K2 b - -",
+		"8/8/7R/8/8/8/3PPP2/1k3K2 b - -",
+		"8/8/6R1/8/8/8/3PPP2/1k3K2 b - -",
+		"8/8/5R2/8/8/8/3PPP2/1k3K2 b - -",
+		"8/8/4R3/8/8/8/3PPP2/1k3K2 b - -",
+		"8/8/3R4/8/8/8/3PPP2/1k3K2 b - -",
+		"8/8/2R5/8/8/8/3PPP2/1k3K2 b - -",
+		"8/8/1R6/8/8/8/3PPP2/1k3K2 b - -",
+		"8/8/R7/8/8/8/3PPP2/1k3K2 b - -",
+		"8/8/8/7R/8/8/3PPP2/1k3K2 b - -",
+		"8/8/8/6R1/8/8/3PPP2/1k3K2 b - -",
+		"8/8/8/5R2/8/8/3PPP2/1k3K2 b - -",
+		"8/8/8/4R3/8/8/3PPP2/1k3K2 b - -",
+		"8/8/8/3R4/8/8/3PPP2/1k3K2 b - -",
+		"8/8/8/2R5/8/8/3PPP2/1k3K2 b - -",
+		"8/8/8/1R6/8/8/3PPP2/1k3K2 b - -",
+		"8/8/8/R7/8/8/3PPP2/1k3K2 b - -",
+		"8/8/8/8/7R/8/3PPP2/1k3K2 b - -",
+		"8/8/8/8/6R1/8/3PPP2/1k3K2 b - -",
+		"8/8/8/8/5R2/8/3PPP2/1k3K2 b - -",
+		"8/8/8/8/4R3/8/3PPP2/1k3K2 b - -",
+		"8/8/8/8/3R4/8/3PPP2/1k3K2 b - -",
+		"8/8/8/8/2R5/8/3PPP2/1k3K2 b - -",
+		"8/8/8/8/1R6/8/3PPP2/1k3K2 b - -",
+		"8/8/8/8/R7/8/3PPP2/1k3K2 b - -",
+		"8/8/8/8/8/7R/3PPP2/1k3K2 b - -",
+		"8/8/8/8/8/6R1/3PPP2/1k3K2 b - -",
+		"8/8/8/8/8/5R2/3PPP2/1k3K2 b - -",
+		"8/8/8/8/8/4R3/3PPP2/1k3K2 b - -",
+		"8/8/8/8/8/3R4/3PPP2/1k3K2 b - -",
+		"8/8/8/8/8/2R5/3PPP2/1k3K2 b - -",
+		"8/8/8/8/8/1R6/3PPP2/1k3K2 b - -",
+		"8/8/8/8/8/R7/3PPP2/1k3K2 b - -",
+		"8/8/8/8/8/8/3PPP1R/1k3K2 b - -",
+		"8/8/8/8/8/8/3PPPR1/1k3K2 b - -",
+		"8/8/8/8/8/8/3PPP2/1k3K1R b - -",
+		"8/8/8/8/8/8/3PPP2/1k3KR1 b - -",
+		"7R/8/8/8/8/8/3PPP2/1k1K4 b - -",
+		"6R1/8/8/8/8/8/3PPP2/1k1K4 b - -",
+		"5R2/8/8/8/8/8/3PPP2/1k1K4 b - -",
+		"4R3/8/8/8/8/8/3PPP2/1k1K4 b - -",
+		"3R4/8/8/8/8/8/3PPP2/1k1K4 b - -",
+		"2R5/8/8/8/8/8/3PPP2/1k1K4 b - -",
+		"1R6/8/8/8/8/8/3PPP2/1k1K4 b - -",
+		"R7/8/8/8/8/8/3PPP2/1k1K4 b - -",
+		"8/7R/8/8/8/8/3PPP2/1k1K4 b - -",
+		"8/6R1/8/8/8/8/3PPP2/1k1K4 b - -",
+		"8/5R2/8/8/8/8/3PPP2/1k1K4 b - -",
+		"8/4R3/8/8/8/8/3PPP2/1k1K4 b - -",
+		"8/3R4/8/8/8/8/3PPP2/1k1K4 b - -",
+		"8/2R5/8/8/8/8/3PPP2/1k1K4 b - -",
+		"8/1R6/8/8/8/8/3PPP2/1k1K4 b - -",
+		"8/R7/8/8/8/8/3PPP2/1k1K4 b - -",
+		"8/8/7R/8/8/8/3PPP2/1k1K4 b - -",
+		"8/8/6R1/8/8/8/3PPP2/1k1K4 b - -",
+		"8/8/5R2/8/8/8/3PPP2/1k1K4 b - -",
+		"8/8/4R3/8/8/8/3PPP2/1k1K4 b - -",
+		"8/8/3R4/8/8/8/3PPP2/1k1K4 b - -",
+		"8/8/2R5/8/8/8/3PPP2/1k1K4 b - -",
+		"8/8/1R6/8/8/8/3PPP2/1k1K4 b - -",
+		"8/8/R7/8/8/8/3PPP2/1k1K4 b - -",
+		"8/8/8/7R/8/8/3PPP2/1k1K4 b - -",
+		"8/8/8/6R1/8/8/3PPP2/1k1K4 b - -",
+		"8/8/8/5R2/8/8/3PPP2/1k1K4 b - -",
+		"8/8/8/4R3/8/8/3PPP2/1k1K4 b - -",
+		"8/8/8/3R4/8/8/3PPP2/1k1K4 b - -",
+		"8/8/8/2R5/8/8/3PPP2/1k1K4 b - -",
+		"8/8/8/1R6/8/8/3PPP2/1k1K4 b - -",
+		"8/8/8/R7/8/8/3PPP2/1k1K4 b - -",
+		"8/8/8/8/7R/8/3PPP2/1k1K4 b - -",
+		"8/8/8/8/6R1/8/3PPP2/1k1K4 b - -",
+		"8/8/8/8/5R2/8/3PPP2/1k1K4 b - -",
+		"8/8/8/8/4R3/8/3PPP2/1k1K4 b - -",
+		"8/8/8/8/3R4/8/3PPP2/1k1K4 b - -",
+		"8/8/8/8/2R5/8/3PPP2/1k1K4 b - -",
+		"8/8/8/8/1R6/8/3PPP2/1k1K4 b - -",
+		"8/8/8/8/R7/8/3PPP2/1k1K4 b - -",
+		"8/8/8/8/8/7R/3PPP2/1k1K4 b - -",
+		"8/8/8/8/8/6R1/3PPP2/1k1K4 b - -",
+		"8/8/8/8/8/5R2/3PPP2/1k1K4 b - -",
+		"8/8/8/8/8/4R3/3PPP2/1k1K4 b - -",
+		"8/8/8/8/8/3R4/3PPP2/1k1K4 b - -",
+		"8/8/8/8/8/2R5/3PPP2/1k1K4 b - -",
+		"8/8/8/8/8/1R6/3PPP2/1k1K4 b - -",
+		"8/8/8/8/8/R7/3PPP2/1k1K4 b - -",
+		"8/8/8/8/8/8/3PPP1R/1k1K4 b - -",
+		"8/8/8/8/8/8/3PPPR1/1k1K4 b - -",
+		"8/8/8/8/8/8/3PPP2/1k1K3R b - -",
+		"8/8/8/8/8/8/3PPP2/1k1K2R1 b - -",
+		"8/8/8/8/8/8/3PPP2/1k1K1R2 b - -",
+		"8/8/8/8/8/8/3PPP2/1k1KR3 b - -"
+	});
+
+	bulk_dump_boards_with_annotations(passed_tests, passed_tests_annotations, std::cerr);
 }
