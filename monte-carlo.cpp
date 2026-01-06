@@ -1,17 +1,21 @@
 #include <bits/stdc++.h>
 #include "board.hpp"
 using namespace std;
+
 void output_summary(const std::vector<long double> &data) {
 	assert(!data.empty());
 	long double sum = 0;
 	for (long double x : data) sum += x;
-	long double std_dev = 0;
+	long double variance = 0;
 	long double mean = sum / data.size();
-	for (long double x : data) std_dev += (x - mean) * (x - mean);
-	std_dev /= data.size() - 1;
-	std_dev = sqrt(std_dev);
+	for (long double x : data) variance += (x - mean) * (x - mean);
+	variance /= data.size() - 1;
+
+	long double std_dev = sqrt(variance);
 	long double error = std_dev / sqrt(data.size());
-	std::cerr << "mean = " << mean << ", std_dev = " << std_dev << " (error ≈ " << error << ")" << "\n";
+	long double binary_variable_variance = mean * (1 - mean);
+	
+	std::cerr << "mean = " << mean << ", std_dev = " << std_dev << " (error ≈ " << error << "), binary_variable_variance = " << binary_variable_variance << ", including all king capture moves is " << (binary_variable_variance / variance) << " times better than vanilla monte-carlo\n";
 }
 template <class T> const T& random_choice(const std::vector<T> &content, mt19937 &rng) {
 	assert(!content.empty());
