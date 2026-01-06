@@ -1,11 +1,11 @@
 #include "test_utils.hpp"
 #include <cstdlib>
 void mark_test_failure() {
-	any_failed = true;
+	count_failed++;
 }
 void test_any_fails() {
-	if (any_failed) {
-		std::cerr << RED << "SOME TESTS HAVE FAILED\n";
+	if (count_failed) {
+		std::cerr << RED << "SOME (" << count_failed << ") TESTS HAVE FAILED\n";
 		exit(1);
 	}
 	else {

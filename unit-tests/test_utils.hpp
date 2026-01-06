@@ -6,7 +6,7 @@
 #include <iostream>
 #include <string>
 #include "../output_operators.hpp"
-inline bool any_failed = false;
+inline int count_failed = false;
 static const std::string GREEN = "\u001b[32m", RED = "\u001b[31m", CLEAR_COLOURS = "\u001b[0m";
 void mark_test_failure();
 template <class c> void assert_equal_impl(int line, c a, c b, const std::string &a_name, const std::string &b_name) {

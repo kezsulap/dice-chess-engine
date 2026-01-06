@@ -39,12 +39,6 @@ std::vector <dice_roll> dice_roll::strict_subsets() const {
 	dice_roll oth = *this;
 	bool found_dec = true;
 	while (true) {
-		// std::cerr << "this.count = ";
-		// for (auto &x : this->count) std::cerr << (int)x << ", ";
-		// std::cerr << "\n";
-		// std::cerr << "oth.count = ";
-		// for (auto &x : oth.count) std::cerr << (int)x << ", ";
-		// std::cerr << "\n";
 		found_dec = false;
 		for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
 			if (oth.count[i]) {
@@ -59,9 +53,6 @@ std::vector <dice_roll> dice_roll::strict_subsets() const {
 		if (found_dec) ret.push_back(oth);
 		else break;
 	}
-	// std::cerr << " finding subsets of " << *this << ": ";
-	// for (auto &x : ret) std::cerr << x << ", ";
-	// std::cerr << "\n";
 	return ret;
 }
 
@@ -292,6 +283,8 @@ dice_roll dice_roll::append(uint8_t piece) const {
 	return ret;
 }
 
+#define assert(...)
+
 movelist board::generate_moves() const {
 	uint8_t current_enpassant_mask = this->en_passant_mask, current_to_move = this->to_move;
 	std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> moves;
@@ -305,7 +298,6 @@ movelist board::generate_moves() const {
 		assert(x.total_rolls() >= 1);
 		if (king_capture_found[x.encode()]) return;
 		king_capture_found[x.encode()] = true;
-		// std::cerr << "Can capture the king with " << x << "\n";
 		moves[x.encode()].clear();
 		if (x.total_rolls() < DICE_COUNT)
 			for (uint8_t piece : PIECE_TYPES)
@@ -346,8 +338,6 @@ movelist board::generate_moves() const {
 		if (is_empty(b.squares[new_x][new_y]) || is_players(b.squares[new_x][new_y], opponent(current_to_move))) {
 			board new_board = b;
 			new_board.move_piece(start_x, start_y, new_x, new_y);
-			// std::cerr << "Make move using go_one, reaching:\n";
-			// new_board.dump(std::cerr);
 			destination.push_back(new_board);
 		}
 		return false;
@@ -362,7 +352,7 @@ movelist board::generate_moves() const {
 			new_board.clear_square(start_x, start_y);
 			new_board.put_piece(new_x, new_y, make_piece(promote_to, current_to_move));
 			if (is_double_step) new_board.add_en_passant(start_y);
-			if (start_x == opp_en_passant_rank) new_board.remove_en_passant(start_y);
+			else if (start_x == opp_en_passant_rank) new_board.remove_en_passant(start_y);
 			destination.push_back(new_board);
 		}
 		return false;
@@ -401,10 +391,7 @@ movelist board::generate_moves() const {
 		if (current.total_rolls() >= DICE_COUNT) continue;
 		std::sort(moves[dice_roll_id].begin(), moves[dice_roll_id].end());
 		moves[dice_roll_id].erase(std::unique(moves[dice_roll_id].begin(), moves[dice_roll_id].end()), moves[dice_roll_id].end());
-		// std::cerr << "Process " << current << ", having " << moves[dice_roll_id].size() << " different positions\n";
 		for (const board &current_board : moves[dice_roll_id]) {
-			// std::cerr << "go with :\n";
-			// current_board.dump(std::cerr);
 			for (size_t i = 0; i < BOARD_WIDTH ; ++i) for (size_t j = 0; j < BOARD_HEIGHT; ++j) {
 				if (is_empty(current_board.squares[i][j]) || !is_players(current_board.squares[i][j], current_to_move)) continue;
 				dice_roll destination_dice_roll = current.append(current_board.squares[i][j]);
@@ -449,27 +436,21 @@ movelist board::generate_moves() const {
 					}
 				};
 				if (current_board.squares[i][j] == make_piece(KING, current_to_move)) {
-					// std::cerr << "Found a king\n";
 					process_hopping_piece({{0, 1}, {0, -1}, {1, -1}, {1, 0}, {1, 1}, {-1, -1}, {-1, 0}, {-1, 1}});
 				}
 				else if (current_board.squares[i][j] == make_piece(QUEEN, current_to_move)) {
-					// std::cerr << "Found a queen\n";
 					process_line_piece({{0, 1}, {0, -1}, {1, -1}, {1, 0}, {1, 1}, {-1, -1}, {-1, 0}, {-1, 1}});
 				}
 				else if (current_board.squares[i][j] == make_piece(ROOK, current_to_move)) {
-					// std::cerr << "Found a rook\n";
 					process_line_piece({{0, 1}, {0, -1}, {1, 0}, {-1, 0}});
 				}
 				else if (current_board.squares[i][j] == make_piece(BISHOP, current_to_move)) {
-					// std::cerr << "Found a bishop\n";
 					process_line_piece({{1, 1}, {1, -1}, {-1, 1}, {-1, -1}});
 				}
 				else if (current_board.squares[i][j] == make_piece(KNIGHT, current_to_move)) {
-					// std::cerr << "Found a knight\n";
 					process_hopping_piece({{1, 2}, {2, 1}, {1, -2}, {2, -1}, {-1, 2}, {-2, 1}, {-1, -2}, {-2, -1}, });
 				}
 				else if (current_board.squares[i][j] == make_piece(PAWN, current_to_move)) {
-					// std::cerr << "Found a pawn\n";
 					process_pawn();
 				}
 			}
@@ -527,29 +508,22 @@ movelist board::generate_moves() const {
 	}
 	for (int dice_roll_id = power(DICE_COUNT + 1, PIECES_TYPES_COUNT); dice_roll_id >= 0; --dice_roll_id) {
 		dice_roll current = dice_roll::decode(dice_roll_id);
-		// std::cerr << "Examine " << current << " (dice_roll_id = " << dice_roll_id << ")\n";
 		if (current.total_rolls() > DICE_COUNT) {
-			// std::cerr << "too big, continue\n";
 			continue;
 		}
 		if (king_capture_found[current.encode()]) {
-			// std::cerr << "Can capture the king with it\n";
 			continue;
 		}
 		std::vector<board> &current_moves = moves[current.encode()];
 		if (!current_moves.empty()) continue;
-		// std::cerr << "No moves found for exactly " << current << ", searching subsets\n";
 		size_t current_total = current.total_rolls();
 		bool found_any = false;
 		std::vector<dice_roll> strict_subsets = current.strict_subsets();
 		for (int i = current_total - 1; i >= 0; --i) {
-			// std::cerr << "Trying to make exactly " << i << ", moves\n";
 			for (const dice_roll &subset : strict_subsets) {
 				if (subset.total_rolls() == i) {
-					// std::cerr << "Testing " << subset << "\n";
 					assert(!king_capture_found[subset.encode()]);
 					if (!moves[subset.encode()].empty()) {
-						// std::cerr << "Is nonempty\n";
 						found_any = true;
 						current_moves.insert(current_moves.end(), moves[subset.encode()].begin(), moves[subset.encode()].end());
 					}
