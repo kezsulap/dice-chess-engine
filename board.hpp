@@ -81,13 +81,15 @@ constexpr uint8_t to_raw_piece(square_t x) {return x &~1;}
 constexpr uint8_t make_piece(uint8_t piece, uint8_t player) {return piece | player;}
 board parse_fen(const std::string &x);
 class board {
-	std::array<std::array<uint8_t, BOARD_HEIGHT>, BOARD_WIDTH> squares;
+	std::array<std::array<uint8_t, BOARD_WIDTH>, BOARD_HEIGHT> squares; /// <Access as squares[rank][file]
 	uint8_t castling_mask;
 	uint8_t to_move;
 	uint8_t en_passant_mask;
 	void touch_castling(int x, int y);
-	void add_en_passant(int x);
+	void add_en_passant(int x, uint8_t reachable);
 	void remove_en_passant(int x);
+	uint8_t get_reachable_en_passant_first_heuristic(uint8_t player) const;
+	uint8_t get_reachable_en_passant_in_final_position(uint8_t player) const; //Decide if this is needed (probably not (?))
 public:
 	void move_piece(int from_x, int from_y, int to_x, int to_y);
 	void clear_square(int x, int y);
@@ -101,6 +103,11 @@ public:
 	uint8_t get_to_move() const;
 	void flip_in_place();
 	board flip() const;
+	uint8_t get_castling_mask() const;
+	void flip_horizontally_in_place();
+	void finalize_en_passant();
+	void shift_in_place(int x);
+	std::vector <int> get_shift_range() const;
 };
 
 

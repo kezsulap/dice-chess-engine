@@ -5,71 +5,119 @@
 std::vector<board> passed_tests;
 std::vector<std::string> passed_tests_annotations;
 
-void ASSERT_MOVES_EQUAL(const std::string &fen, const std::string &dice_string, const std::vector<std::string> &expected_fens) {
-	bool passed[2] = {false, false};
-	for (bool flipped : {false, true}) {
-		dice_roll dice = parse_dice_roll(dice_string);
-		board b = parse_fen(fen);
-		if (flipped) b.flip_in_place();
-		auto got_moves = b.generate_moves().get_moves(dice);
-		std::set<board> expected_boards;
-		for (auto &expected_fen : expected_fens) {
-			if (flipped)
-				expected_boards.insert(parse_fen(expected_fen).flip());
-			else
-				expected_boards.insert(parse_fen(expected_fen));
-		}
-		assert(expected_boards.size() == expected_fens.size());
-		std::vector<board> missing_boards, extranous_boards, duplicated_boards;
-		std::set<board> got_boards_set;
-		for (auto &x : got_moves) {
-			if (!expected_boards.count(x)) extranous_boards.push_back(x);
-			if (got_boards_set.count(x)) duplicated_boards.push_back(x);
-			got_boards_set.insert(x);
-		}
-		for (auto &x : expected_boards) if (!got_boards_set.count(x)) missing_boards.push_back(x);
-		if (!missing_boards.empty() || !extranous_boards.empty() || !duplicated_boards.empty()) {
-			mark_test_failure();
-			std::cerr << RED << "TEST generating boards for " << dice << " from position:\n" << CLEAR_COLOURS;
-			b.dump(std::cerr);
-			std::cerr << "Failed\n";
-			if (!missing_boards.empty()) {
-				std::cerr << RED << "Output missing the following boards (" << missing_boards.size() << "):\n" << CLEAR_COLOURS;
-				bulk_dump_boards(missing_boards, std::cerr);
+int passed_orientations = 0;
+
+std::stringstream failed;
+
+std::map<std::pair <std::string, std::string>, int> existing_tests;
+
+const bool DUMP_PASSED_TESTS = false;
+// const bool DUMP_PASSED_TESTS = true;
+
+void assert_move_equal_impl(int line, const std::string &fen, const std::string &dice_string, const std::vector<std::string> &expected_fens, bool shift = false) {
+	if (DUMP_PASSED_TESTS) {
+		std::cerr << "PROCESSING ALL ORIENTATIONS OF " << fen << " WITH DICE " << dice_string << " FROM LINE " << line << "\n";
+	}
+	auto [it, added] = existing_tests.insert(std::make_pair(std::make_pair(fen, dice_string), line));
+	if (!added) {
+		std::cerr << fen << ", " << dice_string << " repeated, line " << it->second << " and " << line << "\n";
+		assert(false);
+	}
+	dice_roll dice = parse_dice_roll(dice_string);
+	std::vector<bool> passed;
+	bool can_flip_horizontally = parse_fen(fen).get_castling_mask() == 0;
+	std::vector<bool> possible_flip_horizontally = can_flip_horizontally ? std::vector<bool>{false, true} : std::vector<bool>{false};
+	bool all_passed = true;
+	int orientations_count = 0;
+	for (bool flip_horizontally : possible_flip_horizontally) {
+		for (bool flipped : {false, true}) {
+			board b0 = parse_fen(fen);
+			if (flipped) b0.flip_in_place();
+			if (flip_horizontally) b0.flip_horizontally_in_place();
+			std::vector<int> shifts;
+			if (shift) shifts = b0.get_shift_range();
+			else shifts = {0};
+			for (int shift_length : shifts) {
+				orientations_count++;
+				board b = b0;
+				if (shift) b.shift_in_place(shift_length);
+				auto got_moves = b.generate_moves().get_moves(dice);
+				std::set<board> expected_boards;
+				for (auto &expected_fen : expected_fens) {
+					board expected = parse_fen(expected_fen);
+					if (flipped) expected.flip_in_place();
+					if (flip_horizontally) expected.flip_horizontally_in_place();
+					if (shift) expected.shift_in_place(shift_length);
+					expected_boards.insert(expected);
+				}
+				assert(expected_boards.size() == expected_fens.size());
+				std::vector<board> missing_boards, extranous_boards, duplicated_boards;
+				std::set<board> got_boards_set;
+				for (auto &x : got_moves) {
+					if (!expected_boards.count(x)) extranous_boards.push_back(x);
+					if (got_boards_set.count(x)) duplicated_boards.push_back(x);
+					got_boards_set.insert(x);
+				}
+				for (auto &x : expected_boards) if (!got_boards_set.count(x)) missing_boards.push_back(x);
+				if (!missing_boards.empty() || !extranous_boards.empty() || !duplicated_boards.empty()) {
+					passed.push_back(false);
+					mark_test_failure();
+					failed << RED << "TEST generating boards for " << dice << " at line " << line << ", from position:\n" << CLEAR_COLOURS;
+					b.dump(failed);
+					failed << "Failed\n";
+					if (!missing_boards.empty()) {
+						failed << RED << "Output missing the following boards (" << missing_boards.size() << "):\n" << CLEAR_COLOURS;
+						bulk_dump_boards(missing_boards, failed);
+					}
+					if (!extranous_boards.empty()) {
+						failed << RED << "Output containing unexpected boards (" << extranous_boards.size() << "):\n" << CLEAR_COLOURS;
+						bulk_dump_boards(extranous_boards, failed);
+					}
+					if (!duplicated_boards.empty()) {
+						failed << RED << "Output containing duplicated boards:(" << duplicated_boards.size() << ")\n" << CLEAR_COLOURS;
+						bulk_dump_boards(duplicated_boards, failed);
+					}
+					failed << RED << "Output containing " << got_moves.size() << " positions, expected " << expected_fens.size() << "\n" << CLEAR_COLOURS;
+					failed << RED << "ASSERT_MOVES_EQUAL(\"" << (flipped ? b.fen() : fen) << "\", \"" << dice_string << "\", {";
+					bool first = true;
+					for (auto &x : got_moves) {
+						if (!first) failed << ", ";
+						first = false;
+						failed << "\"" << x.fen() << "\"";
+					}
+					failed << "});\n";
+					failed << RED << "----------------------------------------------\n" << CLEAR_COLOURS;
+					all_passed = false;
+				} else {
+					passed.push_back(true);
+					passed_orientations++;
+					if (DUMP_PASSED_TESTS) {
+						std::cerr << GREEN << "PASSED GENERATING MOVES FROM:\n" << CLEAR_COLOURS;
+						b.dump(std::cerr);
+						std::cerr << GREEN << "WITH DICE " << dice_string << "\n" << CLEAR_COLOURS;
+						bulk_dump_boards(got_moves, std::cerr);
+					}
+				}
 			}
-			if (!extranous_boards.empty()) {
-				std::cerr << RED << "Output containing unexpected boards (" << extranous_boards.size() << "):\n" << CLEAR_COLOURS;
-				bulk_dump_boards(extranous_boards, std::cerr);
-			}
-			if (!duplicated_boards.empty()) {
-				std::cerr << RED << "Output containing duplicated boards:(" << duplicated_boards.size() << ")\n" << CLEAR_COLOURS;
-				bulk_dump_boards(duplicated_boards, std::cerr);
-			}
-			std::cerr << RED << "Output containing " << got_moves.size() << " positions, expected " << expected_fens.size() << "\n" << CLEAR_COLOURS;
-			std::cerr << RED << "ASSERT_MOVES_EQUAL(\"" << (flipped ? b.fen() : fen) << "\", \"" << dice_string << "\", {";
-			bool first = true;
-			for (auto &x : got_moves) {
-				if (!first) std::cerr << ", ";
-				first = false;
-				std::cerr << "\"" << x.fen() << "\"";
-			}
-			std::cerr << "});\n";
-			std::cerr << RED << "----------------------------------------------\n" << CLEAR_COLOURS;
-		}
-		else {
-			passed[flipped] = true;
-			passed_tests.push_back(b);
-			std::stringstream s;
-			s << "Test for dice " << dice << "\n";
-			if (expected_boards.empty()) s << "King capture found\n";
-			else s << expected_boards.size() << " moves found\n";
-			passed_tests_annotations.push_back(s.str());
 		}
 	}
-	if (passed[0] != passed[1]) {
-		std::cerr << fen << ", " << dice_string << " FROM ONE SIDE, BUT PASSING FROM THE OTHER!!!!!!!!!!!!!!\n";
+	if (passed != std::vector<bool>(passed.size(), passed[0])) {
+		std::cerr << RED << "Some board orientations of " << fen << " passed, while other failed\n" << CLEAR_COLOURS;
+		parse_fen(fen).dump(std::cerr);
+	}
+	if (all_passed) {
+		board b = parse_fen(fen);
+		passed_tests.push_back(b);
+		std::stringstream s;
+		s << "Test for dice " << dice << "\nLine = " << line << "\n";
+		s << orientations_count << " orientations\n";
+		if (expected_fens.empty()) s << "King capture found\n";
+		else s << expected_fens.size() << " moves found\n";
+		passed_tests_annotations.push_back(s.str());
 	}
 }
+
+#define ASSERT_MOVES_EQUAL(...) assert_move_equal_impl(__LINE__, __VA_ARGS__)
 
 int main() {
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "BRK", {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1"});
@@ -77,9 +125,9 @@ int main() {
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1", "BBB", {});
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1", "QQQ", {});
 	ASSERT_MOVES_EQUAL("rn3b2/pk2p3/b7/P7/2q5/8/8/4K3 b - - 0 1", "BPR", {"1n3b2/rk2p3/p7/Pb6/2q5/8/8/4K3 w - - 0 1"});
-	ASSERT_MOVES_EQUAL("rn3b2/pk2p3/b7/P7/2q5/K7/8/8 b - - 0 1", "BPR", {});
+	ASSERT_MOVES_EQUAL("rn3b2/pk2p3/b7/P7/2q5/K7/8/8 b - - 0 1", "BPR", {}, true);
 	ASSERT_MOVES_EQUAL("k7/8/8/4p3/8/8/4P3/K7 w - - 0 1", "PPB", {"k7/8/8/4p3/4P3/8/8/K7 b - - 0 1"});
-	ASSERT_MOVES_EQUAL("k7/8/8/4p3/8/8/4P3/K7 w - - 0 1", "PBB", {"k7/8/8/4p3/4P3/8/8/K7 b - e3 0 1", "k7/8/8/4p3/8/4P3/8/K7 b - - 0 1"});
+	ASSERT_MOVES_EQUAL("k7/8/8/4p3/8/8/4P3/K7 w - - 0 1", "PBB", {"k7/8/8/4p3/4P3/8/8/K7 b - - 0 1", "k7/8/8/4p3/8/4P3/8/K7 b - - 0 1"});
 	ASSERT_MOVES_EQUAL("7k/P7/2N5/8/8/8/8/K7 w - - 0 1", "PPB", {"7k/1B6/2N5/8/8/8/8/K7 b - - 0 1"});
 	ASSERT_MOVES_EQUAL("7k/PN6/8/8/8/8/8/K7 w - - 0 1", "PPB", {"N6k/1N6/8/8/8/8/8/K7 b - - 0 1", "B6k/1N6/8/8/8/8/8/K7 b - - 0 1", "R6k/1N6/8/8/8/8/8/K7 b - - 0 1", "Q6k/1N6/8/8/8/8/8/K7 b - - 0 1"});
 	ASSERT_MOVES_EQUAL("7k/8/8/8/Pp6/8/8/7K b - a3 0 1", "PRQ", {"7k/8/8/8/P7/1p6/8/7K w - - 0 1", "7k/8/8/8/8/p7/8/7K w - - 0 1"});
@@ -108,12 +156,12 @@ int main() {
 		"K6k/8/8/8/P1PpP3/8/1p6/8 w - -",
 		"K6k/8/8/8/2PpP3/8/p7/8 w - -",
 	});
-	ASSERT_MOVES_EQUAL("k7/8/5p2/8/4P3/8/8/K7 b - e3 0 1", "PPP", {"k7/8/8/8/4P3/5p2/8/K7 w - -", "k7/8/8/8/8/4p3/8/K7 w - -"});
-	ASSERT_MOVES_EQUAL("k7/8/5p2/8/4P3/8/8/K7 b - - 0 1", "PPP", {"k7/8/8/8/4P3/5p2/8/K7 w - -", "k7/8/8/8/8/4p3/8/K7 w - -"});
-	ASSERT_MOVES_EQUAL("k7/8/4p3/8/4PP2/8/8/K7 b - e3 0 1", "PPP", {"k7/8/8/8/4P3/5p2/8/K7 w - -", "k7/8/8/8/8/4p3/8/K7 w - -"});
-	ASSERT_MOVES_EQUAL("k7/8/5pP1/8/6P1/8/8/K7 b - g3 0 1", "PNN", {"k7/8/6P1/5p2/6P1/8/8/K7 w - - 0 1"});
-	ASSERT_MOVES_EQUAL("7k/8/8/3Pp3/8/8/8/7K w - e6 0 1", "PBB", {"7k/8/3P4/4p3/8/8/8/7K b - - 0 1", "7k/8/4P3/8/8/8/8/7K b - - 0 1"});
-	ASSERT_MOVES_EQUAL("7k/8/4n3/3Pp3/8/8/8/7K w - - 0 1", "PQQ", {"7k/8/3Pn3/4p3/8/8/8/7K b - - 0 1", "7k/8/4P3/4p3/8/8/8/7K b - - 0 1"});
+	ASSERT_MOVES_EQUAL("k7/8/5p2/8/4P3/8/8/K7 b - e3 0 1", "PPP", {"k7/8/8/8/4P3/5p2/8/K7 w - -", "k7/8/8/8/8/4p3/8/K7 w - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/5p2/8/4P3/8/8/K7 b - - 0 1", "PPP", {"k7/8/8/8/4P3/5p2/8/K7 w - -", "k7/8/8/8/8/4p3/8/K7 w - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/4p3/8/4PP2/8/8/K7 b - e3 0 1", "PPP", {"k7/8/8/8/4P3/5p2/8/K7 w - -", "k7/8/8/8/8/4p3/8/K7 w - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/5pP1/8/6P1/8/8/K7 b - g3 0 1", "PNN", {"k7/8/6P1/5p2/6P1/8/8/K7 w - - 0 1"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/8/3Pp3/8/8/8/7K w - e6 0 1", "PBB", {"7k/8/3P4/4p3/8/8/8/7K b - - 0 1", "7k/8/4P3/8/8/8/8/7K b - - 0 1"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/4n3/3Pp3/8/8/8/7K w - - 0 1", "PQQ", {"7k/8/3Pn3/4p3/8/8/8/7K b - - 0 1", "7k/8/4P3/4p3/8/8/8/7K b - - 0 1"}, true);
 	ASSERT_MOVES_EQUAL("7k/8/4n3/3PpP2/8/8/8/7K w - e6 0 1", "PPP", {
 		"7k/4P3/4P3/8/8/8/8/7K b - -",
 		"7k/4P3/5P2/4p3/8/8/8/7K b - -",
@@ -138,7 +186,7 @@ int main() {
 		"5B1k/8/4n3/3Pp3/8/8/8/7K b - -",
 		"5R1k/8/4n3/3Pp3/8/8/8/7K b - -",
 		"5Q1k/8/4n3/3Pp3/8/8/8/7K b - -",
-	});
+	}, true);
 	ASSERT_MOVES_EQUAL("2NNNN2/2NK1N2/2N1rN2/2NPp3/8/8/8/7k w - e6 0 1", "KKP", {
 		"2NNNN2/2N1KN2/2N1PN2/2N5/8/8/8/7k b - -",
 		"2NNNN2/2NK1N2/2N1PN2/2N5/8/8/8/7k b - -",
@@ -158,7 +206,7 @@ int main() {
 		"2NNNN2/2N2N2/2NPrN2/2N1K3/8/8/8/7k b - -",
 		"2NNNN2/2N2N2/2N1PN2/2NKp3/8/8/8/7k b - -",
 		"2NNNN2/2N2N2/2NP1N2/2NKp3/8/8/8/7k b - -",
-	});
+	}, true);
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQkq - 0 1", "KRB", {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1RK1 b kq -", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1KR1 b kq -"});
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w Qkq - 0 1", "KRB", {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1KR1 b kq -"});
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQq - 0 1", "KRB", {"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1RK1 b q -", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQ1KR1 b q -"});
@@ -205,8 +253,8 @@ int main() {
 		"rnbqkbnr/pppppppp/8/8/8/2N5/PPPPPPPP/1R1K4 b kq -",
 		"rnbqkbnr/pppppppp/8/8/8/N7/PPPPPPPP/1R1K4 b kq -",
 	});
-	ASSERT_MOVES_EQUAL("7k/8/8/3p4/2Pp4/8/8/7K w - d6 0 1", "PRQ", {"7k/8/8/3P4/3p4/8/8/7K b - -", "7k/8/8/2Pp4/3p4/8/8/7K b - -"});
-	ASSERT_MOVES_EQUAL("7k/8/8/3p4/8/2Pp4/8/7K w - d6 0 1", "PRQ", {"7k/8/8/3p4/2P5/3p4/8/7K b - -"});
+	ASSERT_MOVES_EQUAL("7k/8/8/3p4/2Pp4/8/8/7K w - d6 0 1", "PRQ", {"7k/8/8/3P4/3p4/8/8/7K b - -", "7k/8/8/2Pp4/3p4/8/8/7K b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/8/3p4/8/2Pp4/8/7K w - d6 0 1", "PRQ", {"7k/8/8/3p4/2P5/3p4/8/7K b - -"}, true);
 	ASSERT_MOVES_EQUAL("rnbqkb1r/pppppppp/8/8/8/6n1/PPPPPPPP/RNBQKBNR b KQkq - 0 1", "NBB", {"rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKnNR w KQkq -", "rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNn w Qkq -", "rnbqkb1r/pppppppp/8/7n/8/8/PPPPPPPP/RNBQKBNR w KQkq -", "rnbqkb1r/pppppppp/8/5n2/8/8/PPPPPPPP/RNBQKBNR w KQkq -", "rnbqkb1r/pppppppp/8/8/4n3/8/PPPPPPPP/RNBQKBNR w KQkq -", "r1bqkb1r/pppppppp/2n5/8/8/6n1/PPPPPPPP/RNBQKBNR w KQkq -", "r1bqkb1r/pppppppp/n7/8/8/6n1/PPPPPPPP/RNBQKBNR w KQkq -", "rnbqkb1r/pppppppp/8/8/8/8/PPPPnPPP/RNBQKBNR w KQkq -"});
 	ASSERT_MOVES_EQUAL("rnbqkb1r/pppppppp/8/8/8/1n6/PPPPPPPP/RNBQKBNR b KQkq - 0 1", "NBB", {"rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/nNBQKBNR w Kkq -", "rnbqkb1r/pppppppp/8/8/8/8/PPPPPPPP/RNnQKBNR w KQkq -", "rnbqkb1r/pppppppp/8/2n5/8/8/PPPPPPPP/RNBQKBNR w KQkq -", "rnbqkb1r/pppppppp/8/n7/8/8/PPPPPPPP/RNBQKBNR w KQkq -", "rnbqkb1r/pppppppp/8/8/3n4/8/PPPPPPPP/RNBQKBNR w KQkq -", "r1bqkb1r/pppppppp/2n5/8/8/1n6/PPPPPPPP/RNBQKBNR w KQkq -", "r1bqkb1r/pppppppp/n7/8/8/1n6/PPPPPPPP/RNBQKBNR w KQkq -", "rnbqkb1r/pppppppp/8/8/8/8/PPPnPPPP/RNBQKBNR w KQkq -"});
 	ASSERT_MOVES_EQUAL("8/8/8/8/8/8/6k1/4K2R b K - 0 1", "KBB", {"8/8/8/8/8/7k/8/4K2R w K -", "8/8/8/8/8/6k1/8/4K2R w K -", "8/8/8/8/8/5k2/8/4K2R w K -", "8/8/8/8/8/8/7k/4K2R w K -", "8/8/8/8/8/8/5k2/4K2R w K -", "8/8/8/8/8/8/8/4K2k w - -", "8/8/8/8/8/8/8/4K1kR w K -", "8/8/8/8/8/8/8/4Kk1R w K -"});
@@ -228,7 +276,7 @@ int main() {
 	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/P7/8/R1b1K3 w - - 0 1", "RKB", {"4k3/8/8/8/8/P7/R4K2/2b5 b - -", "4k3/8/8/8/8/P7/R3K3/2b5 b - -", "4k3/8/8/8/8/P7/R2K4/2b5 b - -", "4k3/8/8/8/8/P7/R7/2b2K2 b - -", "4k3/8/8/8/8/P7/R7/2bK4 b - -", "4k3/8/8/8/8/P7/5K2/2R5 b - -", "4k3/8/8/8/8/P7/4K3/2R5 b - -", "4k3/8/8/8/8/P7/3K4/2R5 b - -", "4k3/8/8/8/8/P7/8/2R2K2 b - -", "4k3/8/8/8/8/P7/8/2RK4 b - -", "4k3/8/8/8/8/P7/5K2/1Rb5 b - -", "4k3/8/8/8/8/P7/4K3/1Rb5 b - -", "4k3/8/8/8/8/P7/3K4/1Rb5 b - -", "4k3/8/8/8/8/P7/8/1Rb2K2 b - -", "4k3/8/8/8/8/P7/8/1RbK4 b - -"});
 	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/P7/8/R2nK3 w Q - 0 1", "RKB", {"4k3/8/8/8/8/P7/R4K2/3n4 b - -", "4k3/8/8/8/8/P7/R3K3/3n4 b - -", "4k3/8/8/8/8/P7/R2K4/3n4 b - -", "4k3/8/8/8/8/P7/R7/3n1K2 b - -", "4k3/8/8/8/8/P7/5K2/3R4 b - -", "4k3/8/8/8/8/P7/4K3/3R4 b - -", "4k3/8/8/8/8/P7/3K4/3R4 b - -", "4k3/8/8/8/8/P7/8/3R1K2 b - -", "4k3/8/8/8/8/P7/R7/3K4 b - -", "4k3/8/8/8/8/P7/5K2/2Rn4 b - -", "4k3/8/8/8/8/P7/4K3/2Rn4 b - -", "4k3/8/8/8/8/P7/3K4/2Rn4 b - -", "4k3/8/8/8/8/P7/8/2Rn1K2 b - -", "4k3/8/8/8/8/P7/8/2RK4 b - -", "4k3/8/8/8/8/P7/5K2/1R1n4 b - -", "4k3/8/8/8/8/P7/4K3/1R1n4 b - -", "4k3/8/8/8/8/P7/3K4/1R1n4 b - -", "4k3/8/8/8/8/P7/8/1R1n1K2 b - -", "4k3/8/8/8/8/P7/8/1R1K4 b - -"});
 	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/P7/8/R2nK3 w - - 0 1", "RKB", {"4k3/8/8/8/8/P7/R4K2/3n4 b - -", "4k3/8/8/8/8/P7/R3K3/3n4 b - -", "4k3/8/8/8/8/P7/R2K4/3n4 b - -", "4k3/8/8/8/8/P7/R7/3n1K2 b - -", "4k3/8/8/8/8/P7/5K2/3R4 b - -", "4k3/8/8/8/8/P7/4K3/3R4 b - -", "4k3/8/8/8/8/P7/3K4/3R4 b - -", "4k3/8/8/8/8/P7/8/3R1K2 b - -", "4k3/8/8/8/8/P7/R7/3K4 b - -", "4k3/8/8/8/8/P7/5K2/2Rn4 b - -", "4k3/8/8/8/8/P7/4K3/2Rn4 b - -", "4k3/8/8/8/8/P7/3K4/2Rn4 b - -", "4k3/8/8/8/8/P7/8/2Rn1K2 b - -", "4k3/8/8/8/8/P7/8/2RK4 b - -", "4k3/8/8/8/8/P7/5K2/1R1n4 b - -", "4k3/8/8/8/8/P7/4K3/1R1n4 b - -", "4k3/8/8/8/8/P7/3K4/1R1n4 b - -", "4k3/8/8/8/8/P7/8/1R1n1K2 b - -", "4k3/8/8/8/8/P7/8/1R1K4 b - -"});
-	ASSERT_MOVES_EQUAL("8/8/8/8/8/8/3PPP2/R3K2k w Q - 0 1", "RRK", {});
+	ASSERT_MOVES_EQUAL("8/8/8/8/8/8/3PPP2/R3K2k w Q - 0 1", "RRK", {}, true);
 	ASSERT_MOVES_EQUAL("8/8/8/8/8/8/3PPP2/R3K2k w - - 0 1", "RRK", {
 		"7R/8/8/8/8/8/3PPP2/5K1k b - -",
 		"6R1/8/8/8/8/8/3PPP2/5K1k b - -",
@@ -468,38 +516,38 @@ int main() {
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/4P3/1B6/PPPP1PPP/RNBQK1NR w KQkq - 0 1", "BBK", {});
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/4P3/1B6/PPPP1PPP/RNBQK1NR w KQkq - 0 1", "BBQ", {});
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/4P3/1B6/PPPP1PPP/RNBQK1NR w KQkq - 0 1", "BBR", {});
-	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BPP", {});
-	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BPK", {});
-	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBP", {});
-	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBB", {});
-	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBR", {});
-	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBN", {});
-	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBQ", {});
-	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBK", {});
-	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NNN", {});
-	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NNK", {});
-	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKK", {});
-	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKB", {});
-	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKR", {});
-	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKQ", {});
-	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKP", {});
-	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NPP", {});
-	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NQQ", {});
-	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNP", {});
-	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNN", {});
-	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNB", {});
-	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNQ", {});
-	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNK", {});
-	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNR", {});
-	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/8/7N/4K3 w - - 0 1", "NNN", {});
-	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/8/4K3/4R3 w - - 0 1", "RRR", {});
-	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/8/4K3/4Q3 w - - 0 1", "QQQ", {});
-	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPK", {});
-	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BBP", {});
-	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPP", {});
-	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPQ", {});
-	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPR", {});
-	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPN", {});
+	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BPP", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BPK", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBP", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBB", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBR", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBN", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBQ", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/1p6/8/BP6/8/8/K7 w - - 0 1", "BBK", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NNN", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NNK", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKK", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKB", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKR", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKQ", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NKP", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NPP", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/5N2/8/8/8/8/4K3 w - - 0 1", "NQQ", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNP", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNN", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNB", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNQ", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNK", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/6N1/8/8/4K3 w - - 0 1", "NNR", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/8/7N/4K3 w - - 0 1", "NNN", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/8/4K3/4R3 w - - 0 1", "RRR", {}, true);
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/8/4K3/4Q3 w - - 0 1", "QQQ", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPK", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BBP", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPP", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPQ", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPR", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/k7/8/8/8/4P3/4KB2 w - - 0 1", "BPN", {}, true);
 
 	ASSERT_MOVES_EQUAL("rnbqkbnr/pppppppp/8/8/2B1P3/2N5/PPPP1PPP/R1BQK1NR w KQkq - 0 1", "BRR", {
 		"rnbqkbnr/pppppppp/8/1B6/4P3/2N5/PPPP1PPP/R1BQK1NR b Kkq - 0 1",
@@ -525,25 +573,111 @@ int main() {
 
 	ASSERT_MOVES_EQUAL("rnbq1bnr/pppp1ppp/k3p2Q/8/8/8/PPPPPPPP/RNB1KBNR w KQ - 0 1", "BRQ", {"rnbq1bnr/pppp1ppQ/k3p3/8/8/8/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1pQp/k3p3/8/8/8/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1ppp/k3p1Q1/8/8/8/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1ppp/k3pQ2/8/8/8/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1ppp/k3Q3/8/8/8/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1ppp/k3p3/7Q/8/8/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1ppp/k3p3/6Q1/8/8/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1ppp/k3p3/8/7Q/8/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1ppp/k3p3/8/5Q2/8/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1ppp/k3p3/8/8/7Q/PPPPPPPP/RNB1KBNR b KQ -", "rnbq1bnr/pppp1ppp/k3p3/8/8/4Q3/PPPPPPPP/RNB1KBNR b KQ -"});
 
-	ASSERT_MOVES_EQUAL("4k3/8/4P3/8/5p2/8/4P3/4K3 w - - 0 1", "PPB", {"4k3/8/4P3/8/5P2/8/8/4K3 b - -", "4k3/8/4P3/4P3/5p2/8/8/4K3 b - -", "4k3/4P3/8/8/4Pp2/8/8/4K3 b - e3", "4k3/8/4P3/8/4Pp2/8/8/4K3 b - -", "4k3/4P3/8/8/5p2/4P3/8/4K3 b - -"});
+	ASSERT_MOVES_EQUAL("4k3/8/4P3/8/5p2/8/4P3/4K3 w - - 0 1", "PPB", {"4k3/8/4P3/8/5P2/8/8/4K3 b - -", "4k3/8/4P3/4P3/5p2/8/8/4K3 b - -", "4k3/4P3/8/8/4Pp2/8/8/4K3 b - e3", "4k3/8/4P3/8/4Pp2/8/8/4K3 b - -", "4k3/4P3/8/8/5p2/4P3/8/4K3 b - -"}, true);
 
-	ASSERT_MOVES_EQUAL("K3k3/4p3/8/5P2/8/8/4p3/8 b - -", "PPK", {"K4k2/8/8/5p2/8/8/4p3/8 w - -", "K2k4/8/8/5p2/8/8/4p3/8 w - -", "K7/5k2/8/5p2/8/8/4p3/8 w - -", "K7/4k3/8/5p2/8/8/4p3/8 w - -", "K7/3k4/8/5p2/8/8/4p3/8 w - -", "K4k2/8/8/4pP2/8/8/4p3/8 w - -", "K2k4/8/8/4pP2/8/8/4p3/8 w - -", "K7/5k2/8/4pP2/8/8/4p3/8 w - -", "K7/4k3/8/4pP2/8/8/4p3/8 w - -", "K7/3k4/8/4pP2/8/8/4p3/8 w - -", "K4k2/8/8/5P2/4p3/8/4p3/8 w - -", "K2k4/8/8/5P2/4p3/8/4p3/8 w - -", "K7/5k2/8/5P2/4p3/8/4p3/8 w - -", "K7/4k3/8/5P2/4p3/8/4p3/8 w - -", "K7/3k4/8/5P2/4p3/8/4p3/8 w - -", "K4k2/8/4p3/5P2/8/8/8/4n3 w - -", "K2k4/8/4p3/5P2/8/8/8/4n3 w - -", "K7/5k2/4p3/5P2/8/8/8/4n3 w - -", "K7/4k3/4p3/5P2/8/8/8/4n3 w - -", "K7/3k4/4p3/5P2/8/8/8/4n3 w - -", "K4k2/8/8/4pP2/8/8/8/4n3 w - e6", "K2k4/8/8/4pP2/8/8/8/4n3 w - e6", "K7/5k2/8/4pP2/8/8/8/4n3 w - e6", "K7/4k3/8/4pP2/8/8/8/4n3 w - e6", "K7/3k4/8/4pP2/8/8/8/4n3 w - e6", "K4k2/8/4p3/5P2/8/8/8/4b3 w - -", "K2k4/8/4p3/5P2/8/8/8/4b3 w - -", "K7/5k2/4p3/5P2/8/8/8/4b3 w - -", "K7/4k3/4p3/5P2/8/8/8/4b3 w - -", "K7/3k4/4p3/5P2/8/8/8/4b3 w - -", "K4k2/8/8/4pP2/8/8/8/4b3 w - e6", "K2k4/8/8/4pP2/8/8/8/4b3 w - e6", "K7/5k2/8/4pP2/8/8/8/4b3 w - e6", "K7/4k3/8/4pP2/8/8/8/4b3 w - e6", "K7/3k4/8/4pP2/8/8/8/4b3 w - e6", "K4k2/8/4p3/5P2/8/8/8/4r3 w - -", "K2k4/8/4p3/5P2/8/8/8/4r3 w - -", "K7/5k2/4p3/5P2/8/8/8/4r3 w - -", "K7/4k3/4p3/5P2/8/8/8/4r3 w - -", "K7/3k4/4p3/5P2/8/8/8/4r3 w - -", "K4k2/8/8/4pP2/8/8/8/4r3 w - e6", "K2k4/8/8/4pP2/8/8/8/4r3 w - e6", "K7/5k2/8/4pP2/8/8/8/4r3 w - e6", "K7/4k3/8/4pP2/8/8/8/4r3 w - e6", "K7/3k4/8/4pP2/8/8/8/4r3 w - e6", "K4k2/8/4p3/5P2/8/8/8/4q3 w - -", "K2k4/8/4p3/5P2/8/8/8/4q3 w - -", "K7/5k2/4p3/5P2/8/8/8/4q3 w - -", "K7/4k3/4p3/5P2/8/8/8/4q3 w - -", "K7/3k4/4p3/5P2/8/8/8/4q3 w - -", "K4k2/8/8/4pP2/8/8/8/4q3 w - e6", "K2k4/8/8/4pP2/8/8/8/4q3 w - e6", "K7/5k2/8/4pP2/8/8/8/4q3 w - e6", "K7/4k3/8/4pP2/8/8/8/4q3 w - e6", "K7/3k4/8/4pP2/8/8/8/4q3 w - e6"});
+	ASSERT_MOVES_EQUAL("K3k3/4p3/8/5P2/8/8/4p3/8 b - -", "PPK", {"K4k2/8/8/5p2/8/8/4p3/8 w - -", "K2k4/8/8/5p2/8/8/4p3/8 w - -", "K7/5k2/8/5p2/8/8/4p3/8 w - -", "K7/4k3/8/5p2/8/8/4p3/8 w - -", "K7/3k4/8/5p2/8/8/4p3/8 w - -", "K4k2/8/8/4pP2/8/8/4p3/8 w - -", "K2k4/8/8/4pP2/8/8/4p3/8 w - -", "K7/5k2/8/4pP2/8/8/4p3/8 w - -", "K7/4k3/8/4pP2/8/8/4p3/8 w - -", "K7/3k4/8/4pP2/8/8/4p3/8 w - -", "K4k2/8/8/5P2/4p3/8/4p3/8 w - -", "K2k4/8/8/5P2/4p3/8/4p3/8 w - -", "K7/5k2/8/5P2/4p3/8/4p3/8 w - -", "K7/4k3/8/5P2/4p3/8/4p3/8 w - -", "K7/3k4/8/5P2/4p3/8/4p3/8 w - -", "K4k2/8/4p3/5P2/8/8/8/4n3 w - -", "K2k4/8/4p3/5P2/8/8/8/4n3 w - -", "K7/5k2/4p3/5P2/8/8/8/4n3 w - -", "K7/4k3/4p3/5P2/8/8/8/4n3 w - -", "K7/3k4/4p3/5P2/8/8/8/4n3 w - -", "K4k2/8/8/4pP2/8/8/8/4n3 w - e6", "K2k4/8/8/4pP2/8/8/8/4n3 w - e6", "K7/5k2/8/4pP2/8/8/8/4n3 w - e6", "K7/4k3/8/4pP2/8/8/8/4n3 w - e6", "K7/3k4/8/4pP2/8/8/8/4n3 w - e6", "K4k2/8/4p3/5P2/8/8/8/4b3 w - -", "K2k4/8/4p3/5P2/8/8/8/4b3 w - -", "K7/5k2/4p3/5P2/8/8/8/4b3 w - -", "K7/4k3/4p3/5P2/8/8/8/4b3 w - -", "K7/3k4/4p3/5P2/8/8/8/4b3 w - -", "K4k2/8/8/4pP2/8/8/8/4b3 w - e6", "K2k4/8/8/4pP2/8/8/8/4b3 w - e6", "K7/5k2/8/4pP2/8/8/8/4b3 w - e6", "K7/4k3/8/4pP2/8/8/8/4b3 w - e6", "K7/3k4/8/4pP2/8/8/8/4b3 w - e6", "K4k2/8/4p3/5P2/8/8/8/4r3 w - -", "K2k4/8/4p3/5P2/8/8/8/4r3 w - -", "K7/5k2/4p3/5P2/8/8/8/4r3 w - -", "K7/4k3/4p3/5P2/8/8/8/4r3 w - -", "K7/3k4/4p3/5P2/8/8/8/4r3 w - -", "K4k2/8/8/4pP2/8/8/8/4r3 w - e6", "K2k4/8/8/4pP2/8/8/8/4r3 w - e6", "K7/5k2/8/4pP2/8/8/8/4r3 w - e6", "K7/4k3/8/4pP2/8/8/8/4r3 w - e6", "K7/3k4/8/4pP2/8/8/8/4r3 w - e6", "K4k2/8/4p3/5P2/8/8/8/4q3 w - -", "K2k4/8/4p3/5P2/8/8/8/4q3 w - -", "K7/5k2/4p3/5P2/8/8/8/4q3 w - -", "K7/4k3/4p3/5P2/8/8/8/4q3 w - -", "K7/3k4/4p3/5P2/8/8/8/4q3 w - -", "K4k2/8/8/4pP2/8/8/8/4q3 w - e6", "K2k4/8/8/4pP2/8/8/8/4q3 w - e6", "K7/5k2/8/4pP2/8/8/8/4q3 w - e6", "K7/4k3/8/4pP2/8/8/8/4q3 w - e6", "K7/3k4/8/4pP2/8/8/8/4q3 w - e6"}, true);
 	ASSERT_MOVES_EQUAL("8/4P3/8/8/5p2/8/4P3/k3K3 w - -", "PPN", {"8/6N1/8/8/4Pp2/8/8/k3K3 b - e3", "8/2N5/8/8/4Pp2/8/8/k3K3 b - e3", "8/8/5N2/8/4Pp2/8/8/k3K3 b - e3", "8/8/3N4/8/4Pp2/8/8/k3K3 b - e3", "8/6N1/8/8/5p2/4P3/8/k3K3 b - -", "8/2N5/8/8/5p2/4P3/8/k3K3 b - -", "8/8/5N2/8/5p2/4P3/8/k3K3 b - -", "8/8/3N4/8/5p2/4P3/8/k3K3 b - -"});
 
-	ASSERT_MOVES_EQUAL("7k/8/8/8/3p4/8/2P1P3/7K w - - 0 1", "PPP", {"7k/8/8/8/3PP3/8/8/7K b - e3", "7k/8/8/2P5/3pP3/8/8/7K b - e3", "7k/8/8/8/2PP4/8/8/7K b - c3", "7k/8/8/4P3/2Pp4/8/8/7K b - c3", "7k/8/8/8/2PpP3/8/8/7K b - c3", "7k/8/8/8/2PpP3/8/8/7K b - e3", "7k/8/8/8/3P4/4P3/8/7K b - -", "7k/8/8/2P5/3p4/4P3/8/7K b - -", "7k/8/8/8/2Pp4/4P3/8/7K b - -", "7k/8/8/8/3P4/2P5/8/7K b - -", "7k/8/8/4P3/3p4/2P5/8/7K b - -", "7k/8/8/8/3pP3/2P5/8/7K b - -", "7k/8/8/3P4/8/8/4P3/7K b - -", "7k/8/2P5/8/3p4/8/4P3/7K b - -", "7k/8/8/2P5/3p4/8/4P3/7K b - -", "7k/8/8/3P4/8/8/2P5/7K b - -", "7k/8/4P3/8/3p4/8/2P5/7K b - -", "7k/8/8/4P3/3p4/8/2P5/7K b - -"});
+	ASSERT_MOVES_EQUAL("7k/8/8/8/3p4/8/2P1P3/7K w - - 0 1", "PPP", {"7k/8/8/8/3PP3/8/8/7K b - -", "7k/8/8/2P5/3pP3/8/8/7K b - e3", "7k/8/8/8/2PP4/8/8/7K b - -", "7k/8/8/4P3/2Pp4/8/8/7K b - c3", "7k/8/8/8/2PpP3/8/8/7K b - c3", "7k/8/8/8/2PpP3/8/8/7K b - e3", "7k/8/8/8/3P4/4P3/8/7K b - -", "7k/8/8/2P5/3p4/4P3/8/7K b - -", "7k/8/8/8/2Pp4/4P3/8/7K b - -", "7k/8/8/8/3P4/2P5/8/7K b - -", "7k/8/8/4P3/3p4/2P5/8/7K b - -", "7k/8/8/8/3pP3/2P5/8/7K b - -", "7k/8/8/3P4/8/8/4P3/7K b - -", "7k/8/2P5/8/3p4/8/4P3/7K b - -", "7k/8/8/2P5/3p4/8/4P3/7K b - -", "7k/8/8/3P4/8/8/2P5/7K b - -", "7k/8/4P3/8/3p4/8/2P5/7K b - -", "7k/8/8/4P3/3p4/8/2P5/7K b - -"}, true);
 
-	ASSERT_MOVES_EQUAL("7k/8/8/8/2PpP3/8/8/7K b - - 0 1", "PNN", {"7k/8/8/8/2P1P3/3p4/8/7K w - -"});
-	ASSERT_MOVES_EQUAL("7k/8/8/8/2PpP3/8/8/7K b - c3 0 1", "PNN", {"7k/8/8/8/2P1P3/3p4/8/7K w - -", "7k/8/8/8/4P3/2p5/8/7K w - -"});
-	ASSERT_MOVES_EQUAL("7k/8/8/8/2PpP3/8/8/7K b - e3 0 1", "PNN", {"7k/8/8/8/2P5/4p3/8/7K w - -", "7k/8/8/8/2P1P3/3p4/8/7K w - -"});
-	ASSERT_MOVES_EQUAL("7k/8/8/8/2PpP3/8/8/7K b - c3,e3 0 1", "PNN", {"7k/8/8/8/2P5/4p3/8/7K w - -", "7k/8/8/8/2P1P3/3p4/8/7K w - -", "7k/8/8/8/4P3/2p5/8/7K w - -"});
-
-
-	ASSERT_MOVES_EQUAL("7k/8/8/2p5/2PNP3/8/8/7K b - - 0 1", "PPN", {"7k/8/8/8/2P1P3/3p4/8/7K w - -"});
-	ASSERT_MOVES_EQUAL("7k/8/8/2p5/2PNP3/8/8/7K b - c3 0 1", "PPN", {"7k/8/8/8/2P1P3/3p4/8/7K w - -", "7k/8/8/8/4P3/2p5/8/7K w - -"});
-	ASSERT_MOVES_EQUAL("7k/8/8/2p5/2PNP3/8/8/7K b - e3 0 1", "PPN", {"7k/8/8/8/2P5/4p3/8/7K w - -", "7k/8/8/8/2P1P3/3p4/8/7K w - -"});
-	ASSERT_MOVES_EQUAL("7k/8/8/2p5/2PNP3/8/8/7K b - c3,e3 0 1", "PPN", {"7k/8/8/8/2P5/4p3/8/7K w - -", "7k/8/8/8/2P1P3/3p4/8/7K w - -", "7k/8/8/8/4P3/2p5/8/7K w - -"});
+	ASSERT_MOVES_EQUAL("7k/8/8/8/2PpP3/8/8/7K b - - 0 1", "PNN", {"7k/8/8/8/2P1P3/3p4/8/7K w - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/8/8/2PpP3/8/8/7K b - c3 0 1", "PNN", {"7k/8/8/8/2P1P3/3p4/8/7K w - -", "7k/8/8/8/4P3/2p5/8/7K w - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/8/8/2PpP3/8/8/7K b - e3 0 1", "PNN", {"7k/8/8/8/2P5/4p3/8/7K w - -", "7k/8/8/8/2P1P3/3p4/8/7K w - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/8/8/2PpP3/8/8/7K b - c3,e3 0 1", "PNN", {"7k/8/8/8/2P5/4p3/8/7K w - -", "7k/8/8/8/2P1P3/3p4/8/7K w - -", "7k/8/8/8/4P3/2p5/8/7K w - -"}, true);
 
 
+	ASSERT_MOVES_EQUAL("7k/8/8/2p5/2PNP3/8/8/7K b - - 0 1", "PPN", {"7k/8/8/8/2P1P3/3p4/8/7K w - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/8/2p5/2PNP3/8/8/7K b - c3 0 1", "PPN", {"7k/8/8/8/2P1P3/3p4/8/7K w - -", "7k/8/8/8/4P3/2p5/8/7K w - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/8/2p5/2PNP3/8/8/7K b - e3 0 1", "PPN", {"7k/8/8/8/2P5/4p3/8/7K w - -", "7k/8/8/8/2P1P3/3p4/8/7K w - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/8/2p5/2PNP3/8/8/7K b - c3,e3 0 1", "PPN", {"7k/8/8/8/2P5/4p3/8/7K w - -", "7k/8/8/8/2P1P3/3p4/8/7K w - -", "7k/8/8/8/4P3/2p5/8/7K w - -"}, true);
 
+	ASSERT_MOVES_EQUAL("4k3/4p3/8/8/8/8/4P3/4K3 w - - 0 1", "PBB", {"4k3/4p3/8/8/4P3/8/8/4K3 b - -", "4k3/4p3/8/8/8/4P3/8/4K3 b - -"}, true);
+	
+	ASSERT_MOVES_EQUAL("4k3/3p4/8/8/8/8/4P3/4K3 w - - 0 1", "PBB", {"4k3/3p4/8/8/4P3/8/8/4K3 b - -", "4k3/3p4/8/8/8/4P3/8/4K3 b - -"}, true);
+
+	ASSERT_MOVES_EQUAL("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1", "PBB", {"4k3/8/8/8/4P3/8/8/4K3 b - -", "4k3/8/8/8/8/4P3/8/4K3 b - -"}, true);
+
+	ASSERT_MOVES_EQUAL("4k3/8/8/3p4/8/8/4P3/4K3 w - - 0 1", "PBB", {"4k3/8/8/3p4/4P3/8/8/4K3 b - e3", "4k3/8/8/3p4/8/4P3/8/4K3 b - -"}, true);
+
+	ASSERT_MOVES_EQUAL("4k3/8/8/4p3/8/8/4P3/4K3 w - - 0 1", "PBB", {"4k3/8/8/4p3/4P3/8/8/4K3 b - -", "4k3/8/8/4p3/8/4P3/8/4K3 b - -"}, true); 
+
+	ASSERT_MOVES_EQUAL("7k/8/8/1p6/8/8/P2K4/1N6 w - - 0 1", "PNQ", {"7k/8/8/1p6/P7/2N5/3K4/8 b - a3", "7k/8/8/1p6/8/P1N5/3K4/8 b - -", "7k/8/8/1p6/P7/N7/3K4/8 b - -"}, true);
+
+	ASSERT_MOVES_EQUAL("7k/8/8/8/1p6/8/P2K4/1N6 w - - 0 1", "PNQ", {"7k/8/8/8/Pp6/2N5/3K4/8 b - a3", "7k/8/8/8/1p6/P1N5/3K4/8 b - -", "7k/8/8/8/Pp6/N7/3K4/8 b - a3"}, true);
+
+	ASSERT_MOVES_EQUAL("7k/8/8/p7/1B6/8/P2K4/1N6 w - - 0 1", "PNQ", {"7k/8/8/p7/PB6/2N5/3K4/8 b - a3", "7k/8/8/p7/1B6/P1N5/3K4/8 b - -", "7k/8/8/p7/PB6/N7/3K4/8 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/1p6/2N5/3N4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/1p6/2N5/3NP3/8/8/4K3 b - e3", "7k/8/1p6/2N5/3N4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/1p6/2n5/3N4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/1p6/2n5/3NP3/8/8/4K3 b - -", "7k/8/1p6/2n5/3N4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/1p6/8/3N4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/1p6/8/3NP3/8/8/4K3 b - -", "7k/8/1p6/8/3N4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/1p6/2N5/3n4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/1p6/2N5/3nP3/8/8/4K3 b - -", "7k/8/1p6/2N5/3n4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/1p6/2n5/3n4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/1p6/2n5/3nP3/8/8/4K3 b - -", "7k/8/1p6/2n5/3n4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/1p6/8/3n4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/1p6/8/3nP3/8/8/4K3 b - -", "7k/8/1p6/8/3n4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/1p6/2N5/8/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/1p6/2N5/4P3/8/8/4K3 b - -", "7k/8/1p6/2N5/8/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/1p6/2n5/8/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/1p6/2n5/4P3/8/8/4K3 b - -", "7k/8/1p6/2n5/8/4P3/8/4K3 b - -"}, true);
+
+
+
+
+	ASSERT_MOVES_EQUAL("k7/8/8/2p5/8/8/1P2K3/2N5 w - - 0 1", "PNQ", {"k7/8/8/2p5/1P6/3N4/4K3/8 b - b3", "k7/8/8/2p5/8/1P1N4/4K3/8 b - -", "k7/8/8/2p5/1P6/1N6/4K3/8 b - -", "k7/8/8/2p5/1P6/8/N3K3/8 b - b3", "k7/8/8/2p5/8/1P6/N3K3/8 b - -"}, true);
+
+	//This should change to not include en passant rights after doing !is_attacked_by_anything_other_than_the_pawn(square_hopped_rank, i, this->to_move) reset i-th bit (other than that pawn => possibly 2 pawns) TODO in board.cpp
+		ASSERT_MOVES_EQUAL("k7/8/8/8/2p5/8/1P2K3/2N5 w - - 0 1", "PNQ", {"k7/8/8/8/1Pp5/3N4/4K3/8 b - b3", "k7/8/8/8/2p5/1P1N4/4K3/8 b - -", "k7/8/8/8/1Pp5/1N6/4K3/8 b - b3", "k7/8/8/8/1Pp5/8/N3K3/8 b - b3", "k7/8/8/8/2p5/1P6/N3K3/8 b - -"}, true);
+
+	ASSERT_MOVES_EQUAL("k7/8/8/1p6/2B5/8/1P2K3/2N5 w - - 0 1", "PNQ", {"k7/8/8/1p6/1PB5/3N4/4K3/8 b - b3", "k7/8/8/1p6/2B5/1P1N4/4K3/8 b - -", "k7/8/8/1p6/1PB5/1N6/4K3/8 b - -", "k7/8/8/1p6/1PB5/8/N3K3/8 b - b3", "k7/8/8/1p6/2B5/1P6/N3K3/8 b - -"}, true);
+
+
+	ASSERT_MOVES_EQUAL("k7/8/1p6/2N5/3N4/8/4P3/4K3 w - - 0 1", "PRR", {"k7/8/1p6/2N5/3NP3/8/8/4K3 b - e3", "k7/8/1p6/2N5/3N4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/1p6/2n5/3N4/8/4P3/4K3 w - - 0 1", "PRR", {"k7/8/1p6/2n5/3NP3/8/8/4K3 b - -", "k7/8/1p6/2n5/3N4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/1p6/8/3N4/8/4P3/4K3 w - - 0 1", "PRR", {"k7/8/1p6/8/3NP3/8/8/4K3 b - -", "k7/8/1p6/8/3N4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/1p6/2N5/3n4/8/4P3/4K3 w - - 0 1", "PRR", {"k7/8/1p6/2N5/3nP3/8/8/4K3 b - -", "k7/8/1p6/2N5/3n4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/1p6/2n5/3n4/8/4P3/4K3 w - - 0 1", "PRR", {"k7/8/1p6/2n5/3nP3/8/8/4K3 b - -", "k7/8/1p6/2n5/3n4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/1p6/8/3n4/8/4P3/4K3 w - - 0 1", "PRR", {"k7/8/1p6/8/3nP3/8/8/4K3 b - -", "k7/8/1p6/8/3n4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/1p6/2N5/8/8/4P3/4K3 w - - 0 1", "PRR", {"k7/8/1p6/2N5/4P3/8/8/4K3 b - -", "k7/8/1p6/2N5/8/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("k7/8/1p6/2n5/8/8/4P3/4K3 w - - 0 1", "PRR", {"k7/8/1p6/2n5/4P3/8/8/4K3 b - -", "k7/8/1p6/2n5/8/4P3/8/4K3 b - -"}, true);
+
+
+
+
+	ASSERT_MOVES_EQUAL("7k/8/1p6/8/8/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/1p6/8/4P3/8/8/4K3 b - -", "7k/8/1p6/8/8/4P3/8/4K3 b - -"}, true);
+
+
+	ASSERT_MOVES_EQUAL("7k/8/3p4/2N5/3N4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/3p4/2N5/3NP3/8/8/4K3 b - e3", "7k/8/3p4/2N5/3N4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/3p4/2n5/3N4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/3p4/2n5/3NP3/8/8/4K3 b - -", "7k/8/3p4/2n5/3N4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/3p4/8/3N4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/3p4/8/3NP3/8/8/4K3 b - -", "7k/8/3p4/8/3N4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/3p4/2N5/3n4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/3p4/2N5/3nP3/8/8/4K3 b - -", "7k/8/3p4/2N5/3n4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/3p4/2n5/3n4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/3p4/2n5/3nP3/8/8/4K3 b - -", "7k/8/3p4/2n5/3n4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/3p4/8/3n4/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/3p4/8/3nP3/8/8/4K3 b - -", "7k/8/3p4/8/3n4/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/3p4/2N5/8/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/3p4/2N5/4P3/8/8/4K3 b - -", "7k/8/3p4/2N5/8/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/3p4/2n5/8/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/3p4/2n5/4P3/8/8/4K3 b - -", "7k/8/3p4/2n5/8/4P3/8/4K3 b - -"}, true);
+	ASSERT_MOVES_EQUAL("7k/8/3p4/8/8/8/4P3/4K3 w - - 0 1", "PRR", {"7k/8/3p4/8/4P3/8/8/4K3 b - -", "7k/8/3p4/8/8/4P3/8/4K3 b - -"}, true);
+
+
+
+	ASSERT_MOVES_EQUAL("3k4/3p4/8/8/2N5/8/3P4/3K4 w - - 0 1", "PRR", {"3k4/3p4/8/8/2NP4/8/8/3K4 b - d3", "3k4/3p4/8/8/2N5/3P4/8/3K4 b - -"}, true);
+	ASSERT_MOVES_EQUAL("8/3p4/3k4/8/2N5/8/3P4/3K4 w - - 0 1", "PRR", {"8/3p4/3k4/8/2NP4/8/8/3K4 b - -", "8/3p4/3k4/8/2N5/3P4/8/3K4 b - -"}, true);
+	ASSERT_MOVES_EQUAL("3k4/3p4/3p4/8/2N5/8/3P4/3K4 w - - 0 1", "PRR", {"3k4/3p4/3p4/8/2NP4/8/8/3K4 b - d3", "3k4/3p4/3p4/8/2N5/3P4/8/3K4 b - -"}, true);
+
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - b6 0 1", "PRB", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - b6 0 1", "PRR", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - b6 0 1", "PPR", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - b6 0 1", "PRK", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - b6 0 1", "PRQ", {}, true);
+	ASSERT_MOVES_EQUAL("8/8/8/kpP5/8/8/8/K2R4 w - b6 0 1", "PRR", {}, true);
+
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - - 0 1", "PRB", {"3R4/8/2P5/kp6/8/8/8/K7 b - -", "8/3R4/2P5/kp6/8/8/8/K7 b - -", "8/8/2PR4/kp6/8/8/8/K7 b - -", "8/8/2P5/kp5R/8/8/8/K7 b - -", "8/8/2P5/kp4R1/8/8/8/K7 b - -", "8/8/2P5/kp3R2/8/8/8/K7 b - -", "8/8/2P5/kp2R3/8/8/8/K7 b - -", "8/8/2P5/kpR5/8/8/8/K7 b - -", "8/8/2P5/kR6/8/8/8/K7 b - -", "8/8/2P5/kp6/3R4/8/8/K7 b - -", "8/8/2P5/kp6/8/3R4/8/K7 b - -", "8/8/2P5/kp6/8/8/3R4/K7 b - -", "8/8/2P5/kp6/8/8/8/K2R4 b - -"});
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - - 0 1", "PRR", {});
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - - 0 1", "PPR", {"3R4/2P5/8/kp6/8/8/8/K7 b - -", "8/2PR4/8/kp6/8/8/8/K7 b - -", "8/2P5/3R4/kp6/8/8/8/K7 b - -", "8/2P5/8/kp5R/8/8/8/K7 b - -", "8/2P5/8/kp4R1/8/8/8/K7 b - -", "8/2P5/8/kp3R2/8/8/8/K7 b - -", "8/2P5/8/kp2R3/8/8/8/K7 b - -", "8/2P5/8/kpR5/8/8/8/K7 b - -", "8/2P5/8/kR6/8/8/8/K7 b - -", "8/2P5/8/kp6/3R4/8/8/K7 b - -", "8/2P5/8/kp6/8/3R4/8/K7 b - -", "8/2P5/8/kp6/8/8/3R4/K7 b - -", "8/2P5/8/kp6/8/8/8/K2R4 b - -"});
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - - 0 1", "PRK", {"3R4/8/2P5/kp6/8/8/1K6/8 b - -", "8/3R4/2P5/kp6/8/8/1K6/8 b - -", "8/8/2PR4/kp6/8/8/1K6/8 b - -", "8/8/2P5/kp5R/8/8/1K6/8 b - -", "8/8/2P5/kp4R1/8/8/1K6/8 b - -", "8/8/2P5/kp3R2/8/8/1K6/8 b - -", "8/8/2P5/kp2R3/8/8/1K6/8 b - -", "8/8/2P5/kpR5/8/8/1K6/8 b - -", "8/8/2P5/kR6/8/8/1K6/8 b - -", "8/8/2P5/kp6/3R4/8/1K6/8 b - -", "8/8/2P5/kp6/8/3R4/1K6/8 b - -", "8/8/2P5/kp6/8/8/1K1R4/8 b - -", "3R4/8/2P5/kp6/8/8/K7/8 b - -", "8/3R4/2P5/kp6/8/8/K7/8 b - -", "8/8/2PR4/kp6/8/8/K7/8 b - -", "8/8/2P5/kp5R/8/8/K7/8 b - -", "8/8/2P5/kp4R1/8/8/K7/8 b - -", "8/8/2P5/kp3R2/8/8/K7/8 b - -", "8/8/2P5/kp2R3/8/8/K7/8 b - -", "8/8/2P5/kpR5/8/8/K7/8 b - -", "8/8/2P5/kR6/8/8/K7/8 b - -", "8/8/2P5/kp6/3R4/8/K7/8 b - -", "8/8/2P5/kp6/8/3R4/K7/8 b - -", "8/8/2P5/kp6/8/8/K2R4/8 b - -", "8/8/2P5/kp6/8/8/1K6/3R4 b - -", "8/8/2P5/kp6/8/8/K7/3R4 b - -", "3R4/8/2P5/kp6/8/8/8/1K6 b - -", "8/3R4/2P5/kp6/8/8/8/1K6 b - -", "8/8/2PR4/kp6/8/8/8/1K6 b - -", "8/8/2P5/kp5R/8/8/8/1K6 b - -", "8/8/2P5/kp4R1/8/8/8/1K6 b - -", "8/8/2P5/kp3R2/8/8/8/1K6 b - -", "8/8/2P5/kp2R3/8/8/8/1K6 b - -", "8/8/2P5/kpR5/8/8/8/1K6 b - -", "8/8/2P5/kR6/8/8/8/1K6 b - -", "8/8/2P5/kp6/3R4/8/8/1K6 b - -", "8/8/2P5/kp6/8/3R4/8/1K6 b - -", "8/8/2P5/kp6/8/8/3R4/1K6 b - -", "8/8/2P5/kp6/8/8/8/1K1R4 b - -"});
+	ASSERT_MOVES_EQUAL("8/8/8/kpPR4/8/8/8/K7 w - - 0 1", "PRQ", {"3R4/8/2P5/kp6/8/8/8/K7 b - -", "8/3R4/2P5/kp6/8/8/8/K7 b - -", "8/8/2PR4/kp6/8/8/8/K7 b - -", "8/8/2P5/kp5R/8/8/8/K7 b - -", "8/8/2P5/kp4R1/8/8/8/K7 b - -", "8/8/2P5/kp3R2/8/8/8/K7 b - -", "8/8/2P5/kp2R3/8/8/8/K7 b - -", "8/8/2P5/kpR5/8/8/8/K7 b - -", "8/8/2P5/kR6/8/8/8/K7 b - -", "8/8/2P5/kp6/3R4/8/8/K7 b - -", "8/8/2P5/kp6/8/3R4/8/K7 b - -", "8/8/2P5/kp6/8/8/3R4/K7 b - -", "8/8/2P5/kp6/8/8/8/K2R4 b - -"});
+	ASSERT_MOVES_EQUAL("8/8/8/kpP5/8/8/8/K2R4 w - - 0 1", "PRR", {"7R/8/2P5/kp6/8/8/8/K7 b - -", "6R1/8/2P5/kp6/8/8/8/K7 b - -", "5R2/8/2P5/kp6/8/8/8/K7 b - -", "4R3/8/2P5/kp6/8/8/8/K7 b - -", "3R4/8/2P5/kp6/8/8/8/K7 b - -", "2R5/8/2P5/kp6/8/8/8/K7 b - -", "1R6/8/2P5/kp6/8/8/8/K7 b - -", "R7/8/2P5/kp6/8/8/8/K7 b - -", "8/7R/2P5/kp6/8/8/8/K7 b - -", "8/6R1/2P5/kp6/8/8/8/K7 b - -", "8/5R2/2P5/kp6/8/8/8/K7 b - -", "8/4R3/2P5/kp6/8/8/8/K7 b - -", "8/3R4/2P5/kp6/8/8/8/K7 b - -", "8/2R5/2P5/kp6/8/8/8/K7 b - -", "8/1R6/2P5/kp6/8/8/8/K7 b - -", "8/R7/2P5/kp6/8/8/8/K7 b - -", "8/8/2P4R/kp6/8/8/8/K7 b - -", "8/8/2P3R1/kp6/8/8/8/K7 b - -", "8/8/2P2R2/kp6/8/8/8/K7 b - -", "8/8/2P1R3/kp6/8/8/8/K7 b - -", "8/8/2PR4/kp6/8/8/8/K7 b - -", "8/8/1RP5/kp6/8/8/8/K7 b - -", "8/8/R1P5/kp6/8/8/8/K7 b - -", "8/8/2P5/kp5R/8/8/8/K7 b - -", "8/8/2P5/kp4R1/8/8/8/K7 b - -", "8/8/2P5/kp3R2/8/8/8/K7 b - -", "8/8/2P5/kp2R3/8/8/8/K7 b - -", "8/8/2P5/kp1R4/8/8/8/K7 b - -", "8/8/2P5/kpR5/8/8/8/K7 b - -", "8/8/2P5/kR6/8/8/8/K7 b - -", "8/8/2P5/kp6/7R/8/8/K7 b - -", "8/8/2P5/kp6/6R1/8/8/K7 b - -", "8/8/2P5/kp6/5R2/8/8/K7 b - -", "8/8/2P5/kp6/4R3/8/8/K7 b - -", "8/8/2P5/kp6/3R4/8/8/K7 b - -", "8/8/2P5/kp6/2R5/8/8/K7 b - -", "8/8/2P5/kp6/1R6/8/8/K7 b - -", "8/8/2P5/kp6/R7/8/8/K7 b - -", "8/8/2P5/kp6/8/7R/8/K7 b - -", "8/8/2P5/kp6/8/6R1/8/K7 b - -", "8/8/2P5/kp6/8/5R2/8/K7 b - -", "8/8/2P5/kp6/8/4R3/8/K7 b - -", "8/8/2P5/kp6/8/3R4/8/K7 b - -", "8/8/2P5/kp6/8/2R5/8/K7 b - -", "8/8/2P5/kp6/8/1R6/8/K7 b - -", "8/8/2P5/kp6/8/R7/8/K7 b - -", "8/8/2P5/kp6/8/8/7R/K7 b - -", "8/8/2P5/kp6/8/8/6R1/K7 b - -", "8/8/2P5/kp6/8/8/5R2/K7 b - -", "8/8/2P5/kp6/8/8/4R3/K7 b - -", "8/8/2P5/kp6/8/8/3R4/K7 b - -", "8/8/2P5/kp6/8/8/2R5/K7 b - -", "8/8/2P5/kp6/8/8/1R6/K7 b - -", "8/8/2P5/kp6/8/8/R7/K7 b - -", "8/8/2P5/kp6/8/8/8/K6R b - -", "8/8/2P5/kp6/8/8/8/K5R1 b - -", "8/8/2P5/kp6/8/8/8/K4R2 b - -", "8/8/2P5/kp6/8/8/8/K3R3 b - -", "8/8/2P5/kp6/8/8/8/K2R4 b - -", "8/8/2P5/kp6/8/8/8/K1R5 b - -", "8/8/2P5/kp6/8/8/8/KR6 b - -"});
+
+	ASSERT_MOVES_EQUAL("1k1K4/8/8/2p5/3p4/8/1PP5/8 w - - 0 1", "PPR", {"1k1K4/8/8/2p5/1PPp4/8/8/8 b - c3", "1k1K4/8/8/2p5/1P1p4/2P5/8/8 b - b3", "1k1K4/8/8/2p5/2Pp4/1P6/8/8 b - c3", "1k1K4/8/8/2p5/3p4/1PP5/8/8 b - -", "1k1K4/8/8/2P5/3p4/8/2P5/8 b - -", "1k1K4/8/8/1Pp5/3p4/8/2P5/8 b - -", "1k1K4/8/8/2p5/1P1p4/8/2P5/8 b - -", "1k1K4/8/8/2p5/3P4/8/1P6/8 b - -", "1k1K4/8/8/2p5/2Pp4/8/1P6/8 b - -"});
+
+	std::cerr << GREEN << "PASSED TESTS (" << passed_tests.size() << "):\n" << CLEAR_COLOURS;
 	bulk_dump_boards_with_annotations(passed_tests, passed_tests_annotations, std::cerr);
+
+
+
+	std::cerr << failed.str();
+	std::cerr << "Passed total of " << passed_orientations << " including all board orientations\n";
 }

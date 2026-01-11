@@ -110,6 +110,20 @@ board board::flip() const {
 	return ret;
 }
 
+void board::flip_horizontally_in_place() {
+	assert(castling_mask == 0);
+	for (auto &row : squares) std::reverse(row.begin(), row.end());
+	uint8_t new_enpassant_mask = 0;
+	for (int i = 0; i < BOARD_WIDTH; ++i) {
+		if (this->en_passant_mask >> i & 1) {
+			new_enpassant_mask |= (1 << (BOARD_WIDTH - i - 1));
+		}
+	}
+	this->en_passant_mask = new_enpassant_mask;
+}
+
+uint8_t board::get_castling_mask() const {return this->castling_mask;}
+
 board parse_fen(const std::string &fen){ //TODO: string_view
 	const std::vector<std::string> content = split(fen, ' ');
 	assert(content.size() >= 4 && content.size() <= 6);
@@ -285,6 +299,124 @@ dice_roll dice_roll::append(uint8_t piece) const {
 
 #define assert(...)
 
+uint8_t board::get_reachable_en_passant_first_heuristic(uint8_t player) const {
+	static_assert(BOARD_HEIGHT == 8 && DICE_COUNT == 3);
+	uint8_t ret = 0;
+	if (player == WHITE) {
+		for (int rank = 1; rank <= 4; ++rank) {
+			int range = rank == 1 ? 2 : 5 - rank;
+			bool except_this = rank == 4;
+			for (int file = 0; file < BOARD_WIDTH; ++file) {
+				if (this->squares[rank][file] == make_piece(PAWN, WHITE)) {
+					for (int x = file - range; x <= file + range; ++x) { //TODO: Anything less dumb
+						if (x >= 0 && x < BOARD_WIDTH && (except_this ? x != file : true)) {
+							ret |= (1 << x);
+						}
+					}
+				}
+			}
+		}
+	}
+	else {
+		for (int rank = 3; rank <= 6; ++rank) {
+			int range = rank == 6 ? 2 : rank - 2;
+			bool except_this = rank == 3;
+			for (int file = 0; file < BOARD_WIDTH; ++file) {
+				if (this->squares[rank][file] == make_piece(PAWN, BLACK)) {
+					for (int x = file - range; x <= file + range; ++x) { //TODO: Anything less dumb
+						if (x >= 0 && x < BOARD_WIDTH && (except_this ? x != file : true)) {
+							ret |= (1 << x);
+						}
+					}
+				}
+			}
+		}
+	}
+	return ret;
+}
+
+#include <bitset>
+#define MASK(x) #x " = " << std::bitset<8>(x) << ""
+
+void board::finalize_en_passant() {
+	static_assert(BOARD_HEIGHT == 8 && DICE_COUNT == 3);
+	// std::cerr << MASK(this->en_passant_mask) << "\n";
+	if (!this->en_passant_mask) return;
+	int en_passant_rank = (this->to_move == BLACK ? 3 : 4);
+	int square_hopped_rank = (this->to_move == BLACK ? 2 : 5); //TODO: better name
+	for (size_t i = 0; i < BOARD_WIDTH; ++i) { //TODO: how much is there to gain from using __ctz to iterate through bits in all contexts like this?
+		if (this->en_passant_mask >> i & 1) {
+			if (!is_empty(this->squares[square_hopped_rank][i])) {
+				assert(is_players(this->squares[square_hopped_rank][i], oppnonent(this->to_move)));
+				//TODO: if !is_attacked_by_anything_other_than_the_pawn(square_hopped_rank, i, this->to_move) reset i-th bit (other than that pawn => possibly 2 pawns)
+				if ((i == 0 || this->squares[en_passant_rank][i - 1] != make_piece(PAWN, this->to_move)) && (i == BOARD_WIDTH + 1 || this->squares[en_passant_rank][i + 1] != make_piece(PAWN, this->to_move)))
+					this->en_passant_mask &= ~(1 << i);
+			}
+		}
+	}
+	// std::cerr << MASK(this->en_passant_mask) << "\n";
+	if (!this->en_passant_mask) return;
+
+	
+	uint8_t reachable = 0;
+
+	int dir = (this->to_move == BLACK ? 1 : -1);
+
+	for (int i = 0; i < BOARD_WIDTH; ++i) {
+		if (this->squares[en_passant_rank + dir][i] == make_piece(PAWN, this->to_move)) {
+			if (this->squares[en_passant_rank][i] == EMPTY || is_players(this->squares[en_passant_rank][i], this->to_move))
+				reachable |= (1 << i);
+			if (i > 0 && this->squares[en_passant_rank][i - 1] != EMPTY && is_players(this->squares[en_passant_rank][i - 1], opponent(this->to_move)))
+				reachable |= (1 << (i - 1));
+			if (i + 1 < BOARD_WIDTH && this->squares[en_passant_rank][i + 1] != EMPTY && is_players(this->squares[en_passant_rank][i + 1], opponent(this->to_move)))
+				reachable |= (1 << (i + 1));
+		}
+	}
+
+	uint8_t mask_5th_rank = 0;
+
+	for (int i = 0; i < BOARD_WIDTH; ++i) {
+		if (this->squares[en_passant_rank + 2 * dir][i] == make_piece(PAWN, this->to_move)) {
+			if (is_empty(this->squares[en_passant_rank + dir][i]))
+				mask_5th_rank |= (1 << i);
+			if (i > 0 && this->squares[en_passant_rank + dir][i - 1] != EMPTY && is_players(this->squares[en_passant_rank + dir][i - 1], opponent(this->to_move)))
+				mask_5th_rank |= (1 << (i - 1));
+			if (i + 1 < BOARD_WIDTH && this->squares[en_passant_rank + dir][i + 1] != EMPTY && is_players(this->squares[en_passant_rank + dir][i + 1], opponent(this->to_move)))
+				mask_5th_rank |= (1 << (i + 1));
+		}
+	}
+
+	for (int i = 0; i < BOARD_WIDTH; ++i) {
+		if (this->squares[en_passant_rank + 3 * dir][i] == make_piece(PAWN, this->to_move) && is_empty(this->squares[en_passant_rank + 2 * dir][i]) && is_empty(this->squares[en_passant_rank + dir][i])) {
+			mask_5th_rank |= (1 << i);
+		}
+	}
+
+	for (int i = 0; i < BOARD_WIDTH; ++i) {
+		if (mask_5th_rank >> i & 1) {
+			//It's OK to omit pushing forward from here as forward + en passant is always equivalent to normal capture + forward
+			// Therefore no: 
+			// if (is_empty(this->squares[en_passant_rank][i]))
+				// reachable |= (1 << i);
+			if (i > 0 && !is_empty(this->squares[en_passant_rank][i - 1]) && is_players(this->squares[en_passant_rank][i - 1], opponent(this->to_move)))
+				reachable |= (1 << (i - 1));
+			if (i + 1 < BOARD_WIDTH && !is_empty(this->squares[en_passant_rank][i + 1]) && is_players(this->squares[en_passant_rank][i + 1], opponent(this->to_move)))
+				reachable |= (1 << (i + 1));
+		}
+	}
+
+	for (int i = 0; i < BOARD_WIDTH; ++i) {
+		if (this->squares[en_passant_rank][i] == make_piece(PAWN, this->to_move))
+			reachable |= (1 << i);
+	}
+	
+	// std::cerr << MASK(mask_5th_rank) << "\n";
+	// std::cerr << MASK(reachable) << "\n";
+
+	this->en_passant_mask &= (reachable << 1) | (reachable >> 1);
+
+}
+
 movelist board::generate_moves() const {
 	uint8_t current_enpassant_mask = this->en_passant_mask, current_to_move = this->to_move;
 	std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> moves;
@@ -293,6 +425,8 @@ movelist board::generate_moves() const {
 	moves[0][0].en_passant_mask = 0;
 	moves[0][0].to_move ^= 1;
 
+	uint8_t reachable_en_passant = this->get_reachable_en_passant_first_heuristic(opponent(this->to_move));
+	
 
 	auto mark_king_capture_rec = [&](const dice_roll &x, auto &self) -> void {
 		assert(x.total_rolls() >= 1);
@@ -351,7 +485,7 @@ movelist board::generate_moves() const {
 			board new_board = b;
 			new_board.clear_square(start_x, start_y);
 			new_board.put_piece(new_x, new_y, make_piece(promote_to, current_to_move));
-			if (is_double_step) new_board.add_en_passant(start_y);
+			if (is_double_step) new_board.add_en_passant(start_y, reachable_en_passant);
 			else if (start_x == opp_en_passant_rank) new_board.remove_en_passant(start_y);
 			destination.push_back(new_board);
 		}
@@ -502,10 +636,12 @@ movelist board::generate_moves() const {
 	for (size_t dice_roll_id = 0; dice_roll_id < power(DICE_COUNT + 1, PIECES_TYPES_COUNT) ; ++dice_roll_id) {
 		dice_roll current = dice_roll::decode(dice_roll_id);
 		if (current.total_rolls() == DICE_COUNT) {
+			for (auto &x : moves[dice_roll_id]) x.finalize_en_passant();
 			std::sort(moves[dice_roll_id].begin(), moves[dice_roll_id].end());
 			moves[dice_roll_id].erase(std::unique(moves[dice_roll_id].begin(), moves[dice_roll_id].end()), moves[dice_roll_id].end());
 		}
 	}
+	std::vector <bool> eliminated_en_passant(power(DICE_COUNT + 1, PIECES_TYPES_COUNT));
 	for (int dice_roll_id = power(DICE_COUNT + 1, PIECES_TYPES_COUNT); dice_roll_id >= 0; --dice_roll_id) {
 		dice_roll current = dice_roll::decode(dice_roll_id);
 		if (current.total_rolls() > DICE_COUNT) {
@@ -525,7 +661,11 @@ movelist board::generate_moves() const {
 					assert(!king_capture_found[subset.encode()]);
 					if (!moves[subset.encode()].empty()) {
 						found_any = true;
-						current_moves.insert(current_moves.end(), moves[subset.encode()].begin(), moves[subset.encode()].end());
+						if (!eliminated_en_passant[subset.encode()]) {
+							for (board &b : moves[subset.encode()]) b.finalize_en_passant();
+							eliminated_en_passant[subset.encode()] = true;
+						}
+						current_moves.insert(current_moves.end(), moves[subset.encode()].begin(), moves[subset.encode()].end()); //TODO: am I 100% sure those subsets are always disjoint(?)
 					}
 				}
 			}
@@ -560,8 +700,8 @@ void board::touch_castling(int x, int y) {
 	}
 }
 
-void board::add_en_passant(int x) {
-	this->en_passant_mask |= (1 << x);
+void board::add_en_passant(int x, uint8_t reachable) {
+	(this->en_passant_mask |= (1 << x)) &= reachable;
 }
 void board::remove_en_passant(int x) {
 	this->en_passant_mask &=~ (1 << x);
@@ -695,4 +835,39 @@ void bulk_dump_boards_with_annotations(const std::vector<board> &boards, const s
 		}
 		i = end;
 	}
+}
+void board::shift_in_place(int x) { //square (i, j) -> (i, j + x)
+	assert(!this->castling_mask);
+	if (x > 0) {
+		for (int i = 0; i < BOARD_HEIGHT; ++i)
+			for (int j = BOARD_WIDTH - 1; j >= 0; --j)
+				this->squares[i][j] = (j - x >= 0 ? this->squares[i][j - x] : EMPTY);
+		this->en_passant_mask <<= x;
+	}
+	else if (x < 0) {
+		for (int i = 0; i < BOARD_HEIGHT; ++i)
+			for (int j = 0; j < BOARD_WIDTH; ++j)
+				this->squares[i][j] = (j - x < BOARD_WIDTH ? this->squares[i][j - x] : EMPTY);
+		this->en_passant_mask >>= -x;
+	}
+	//else pass;
+}
+
+std::vector <int> board::get_shift_range() const {
+	int leftmost = std::numeric_limits<int>::max(), rightmost = -1;
+	for (int i = 0; i < BOARD_HEIGHT; ++i) {
+		for (int j = 0; j < BOARD_WIDTH; ++j) {
+			if (!is_empty(this->squares[i][j])) {
+				leftmost = std::min(leftmost, j);
+				rightmost = std::max(rightmost, j);
+			}
+		}
+	}
+	assert(leftmost != numeric_limits<int>::max());
+	assert(rightmost != -1);
+	std::vector<int> ret;
+	for (int j = -leftmost; j < BOARD_WIDTH - rightmost; ++j) {
+		ret.push_back(j);
+	}
+	return ret;
 }

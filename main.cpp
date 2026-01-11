@@ -5,6 +5,10 @@ int main(int argc, char **argv) {
 	assert(argc == 2 || argc == 3);
 	string fen = argv[1];
 	board b = parse_fen(fen);
+	b.dump(std::cerr);
+	b.finalize_en_passant();
+	b.dump(std::cerr);
+	return 0;
 	std::optional<dice_roll> roll;
 	if (argc == 3) roll = parse_dice_roll(argv[2]);
 	movelist m = b.generate_moves();
