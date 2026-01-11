@@ -90,10 +90,10 @@ class board {
 	void remove_en_passant(int x);
 	uint8_t get_reachable_en_passant_first_heuristic(uint8_t player) const;
 	uint8_t get_reachable_en_passant_in_final_position(uint8_t player) const; //Decide if this is needed (probably not (?))
-public:
 	void move_piece(int from_x, int from_y, int to_x, int to_y);
 	void clear_square(int x, int y);
 	void put_piece(int x, int y, uint8_t piece);
+public:
 	movelist generate_moves() const;
 	partial_movelist generate_partial_moves() const;
 	void dump(std::ostream &o) const;
@@ -104,6 +104,7 @@ public:
 	void flip_in_place();
 	board flip() const;
 	uint8_t get_castling_mask() const;
+	uint8_t get_en_passant_mask() const;
 	void flip_horizontally_in_place();
 	void finalize_en_passant();
 	void shift_in_place(int x);

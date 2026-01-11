@@ -123,6 +123,7 @@ void board::flip_horizontally_in_place() {
 }
 
 uint8_t board::get_castling_mask() const {return this->castling_mask;}
+uint8_t board::get_en_passant_mask() const {return this->en_passant_mask;}
 
 board parse_fen(const std::string &fen){ //TODO: string_view
 	const std::vector<std::string> content = split(fen, ' ');
