@@ -365,8 +365,9 @@ void board::finalize_en_passant() {
 
 	for (int i = 0; i < BOARD_WIDTH; ++i) {
 		if (this->squares[en_passant_rank + dir][i] == make_piece(PAWN, this->to_move)) {
-			if (this->squares[en_passant_rank][i] == EMPTY || is_players(this->squares[en_passant_rank][i], this->to_move))
-				reachable |= (1 << i);
+			//It's OK to omit pushing forward from here as forward + en passant is always equivalent to normal capture + forward
+			// if (this->squares[en_passant_rank][i] == EMPTY || is_players(this->squares[en_passant_rank][i], this->to_move))
+				// reachable |= (1 << i);
 			if (i > 0 && this->squares[en_passant_rank][i - 1] != EMPTY && is_players(this->squares[en_passant_rank][i - 1], opponent(this->to_move)))
 				reachable |= (1 << (i - 1));
 			if (i + 1 < BOARD_WIDTH && this->squares[en_passant_rank][i + 1] != EMPTY && is_players(this->squares[en_passant_rank][i + 1], opponent(this->to_move)))
