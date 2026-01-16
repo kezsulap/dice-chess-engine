@@ -31,6 +31,33 @@ constexpr int power(int base, int exponent) {
 
 const int OMEGA = power(PIECES_TYPES_COUNT, DICE_COUNT);
 
+
+consteval auto make_pascal_triangle() {
+	const int N =	DICE_COUNT + PIECES_TYPES_COUNT;
+
+	std::array<std::array<unsigned, N>, N> p{};
+
+	for (std::size_t i = 0; i < N; ++i) {
+		p[i][0] = 1;
+		p[i][i] = 1;
+		for (std::size_t j = 1; j < i; ++j) {
+			p[i][j] = p[i - 1][j - 1] + p[i - 1][j];
+		}
+	}
+	return p;
+}
+
+constexpr auto pascal = make_pascal_triangle();
+
+inline consteval size_t get_dice_roll_length() {
+	size_t ret = 0;
+	for (size_t i = 0; i <= DICE_COUNT; ++i) ret += pascal[PIECES_TYPES_COUNT + i - 1][i];
+	return ret;
+}
+
+
+constexpr size_t DICE_ROLL_LENGTH = get_dice_roll_length();
+
 constexpr uint8_t opponent(uint8_t x) {return x ^ 1;}
 
 int get_screen_width();
@@ -60,11 +87,11 @@ const std::vector<dice_roll> full_and_partial_dice_rolls = make_rolls_with(0, 3)
 std::ostream &operator<<(std::ostream &o, const dice_roll &dice);
 
 class movelist {
-	std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> moves;
+	std::array<std::vector<board>, DICE_ROLL_LENGTH> moves;
 
 public:
-	movelist(const std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> &moves_);
-	movelist(std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> &&moves_);
+	movelist(const std::array<std::vector<board>, DICE_ROLL_LENGTH> &moves_);
+	movelist(std::array<std::vector<board>, DICE_ROLL_LENGTH> &&moves_);
 	const std::vector<board>& get_moves(const dice_roll &x) const; //Keep as a separate class so can be done lazily or anything alike in the future, probably replace to return some wrapper around possibly multiple vectors
 																																 //(use when there's no way to move all 3 pieces, but there are some to move a subset and those strict_subsets can be only stored once)
 	int count_winning_on_the_spot() const;

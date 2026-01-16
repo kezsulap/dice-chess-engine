@@ -19,6 +19,8 @@ uint8_t get_player(uint8_t x) {
 }
 
 
+
+
 std::vector<std::string> split(const std::string& str, char delimiter) { //TODO: move to some shared location
 	std::vector<std::string> tokens;
 	size_t start = 0;
@@ -56,8 +58,8 @@ std::vector <dice_roll> dice_roll::strict_subsets() const {
 	return ret;
 }
 
-movelist::movelist(const std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> &moves_) : moves(moves_) {}
-movelist::movelist(std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> &&moves_) : moves(std::move(moves_)) {}
+movelist::movelist(const std::array<std::vector<board>, DICE_ROLL_LENGTH> &moves_) : moves(moves_) {}
+movelist::movelist(std::array<std::vector<board>, DICE_ROLL_LENGTH> &&moves_) : moves(std::move(moves_)) {}
 
 int movelist::count_winning_on_the_spot() const {
 	int ret = 0;
@@ -252,18 +254,37 @@ std::string board::fen() const {
 
 int dice_roll::encode() const {
 	int ret = 0;
+	int sum = this->total_rolls();
+	for (int i = 0; i < sum; ++i) ret += pascal[PIECES_TYPES_COUNT + i - 1][i];
 	for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
-		ret += count[i] * power(DICE_COUNT + 1, i);
+		for (int _ = 0; _ < count[i]; ++_) {
+			int len = PIECES_TYPES_COUNT - i - 1;
+			ret += pascal[sum + len - 1][sum];
+			sum--;
+		}
 	}
+	assert(ret >= 0 && ret < (int)DICE_ROLL_LENGTH);
 	return ret;
 }
 
 dice_roll dice_roll::decode(int x) {
-	dice_roll ret;
-	for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
-		ret.count[i] = x % (DICE_COUNT + 1);
-		x /= DICE_COUNT + 1;
+	assert(x >= 0 && x < (int)DICE_ROLL_LENGTH);
+	dice_roll ret = {};
+	int sum = 0;
+	while (x >= pascal[PIECES_TYPES_COUNT + sum - 1][sum]) {
+		x -= pascal[PIECES_TYPES_COUNT + sum - 1][sum];
+		sum++;
 	}
+	assert(sum <= DICE_COUNT);
+	for (size_t i = 0; i < PIECES_TYPES_COUNT; ++i) {
+		int len = PIECES_TYPES_COUNT - i - 1;
+		while (sum && x >= pascal[len + sum - 1][sum]) {
+			ret.count[i]++;
+			x -= pascal[len + sum - 1][sum];
+			sum--;
+		}
+	}
+	assert(x == 0);
 	return ret;
 }
 
@@ -448,8 +469,8 @@ void board::finalize_en_passant() {
 
 movelist board::generate_moves() const {
 	uint8_t current_enpassant_mask = this->en_passant_mask, current_to_move = this->to_move;
-	std::array<std::vector<board>, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> moves;
-	std::array<bool, power(DICE_COUNT + 1, PIECES_TYPES_COUNT)> king_capture_found = {};
+	std::array<std::vector<board>, DICE_ROLL_LENGTH> moves;
+	std::array<bool, DICE_ROLL_LENGTH> king_capture_found = {};
 	moves[0].push_back(*this);
 	moves[0][0].en_passant_mask = 0;
 	moves[0][0].to_move ^= 1;
@@ -549,7 +570,7 @@ movelist board::generate_moves() const {
 
 
 
-	for (size_t dice_roll_id = 0; dice_roll_id < power(DICE_COUNT + 1, PIECES_TYPES_COUNT) ; ++dice_roll_id) {
+	for (size_t dice_roll_id = 0; dice_roll_id < DICE_ROLL_LENGTH; ++dice_roll_id) {
 		dice_roll current = dice_roll::decode(dice_roll_id);
 		if (current.total_rolls() >= DICE_COUNT) continue;
 		std::sort(moves[dice_roll_id].begin(), moves[dice_roll_id].end());
@@ -662,7 +683,7 @@ movelist board::generate_moves() const {
 			}
 		}
 	}
-	for (size_t dice_roll_id = 0; dice_roll_id < power(DICE_COUNT + 1, PIECES_TYPES_COUNT) ; ++dice_roll_id) {
+	for (size_t dice_roll_id = 0; dice_roll_id < DICE_ROLL_LENGTH ; ++dice_roll_id) {
 		dice_roll current = dice_roll::decode(dice_roll_id);
 		if (current.total_rolls() == DICE_COUNT) {
 			for (auto &x : moves[dice_roll_id]) x.finalize_en_passant();
@@ -670,8 +691,8 @@ movelist board::generate_moves() const {
 			moves[dice_roll_id].erase(std::unique(moves[dice_roll_id].begin(), moves[dice_roll_id].end()), moves[dice_roll_id].end());
 		}
 	}
-	std::vector <bool> eliminated_en_passant(power(DICE_COUNT + 1, PIECES_TYPES_COUNT));
-	for (int dice_roll_id = power(DICE_COUNT + 1, PIECES_TYPES_COUNT); dice_roll_id >= 0; --dice_roll_id) {
+	std::vector <bool> eliminated_en_passant(DICE_ROLL_LENGTH);
+	for (int dice_roll_id = DICE_ROLL_LENGTH - 1; dice_roll_id >= 0; --dice_roll_id) {
 		dice_roll current = dice_roll::decode(dice_roll_id);
 		if (current.total_rolls() > DICE_COUNT) {
 			continue;
@@ -706,9 +727,9 @@ movelist board::generate_moves() const {
 	return moves;
 }
 
-std::vector<dice_roll> make_rolls_with(int low, int high) {
+std::vector<dice_roll> make_rolls_with(int low, int high) { //TODO: Maybe this can be replaced with just iterating through numbers in range and decoding them on the fly (?)
 	std::vector<dice_roll> ret;
-	for (int i = 0; i < power(DICE_COUNT + 1, PIECES_TYPES_COUNT); ++i) {
+	for (int i = 0; i < DICE_ROLL_LENGTH; ++i) {
 		dice_roll current = dice_roll::decode(i);
 		if (current.total_rolls() >= low && current.total_rolls() <= high)
 			ret.push_back(current);
