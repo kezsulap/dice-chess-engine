@@ -125,6 +125,14 @@ void board::flip_horizontally_in_place() {
 uint8_t board::get_castling_mask() const {return this->castling_mask;}
 uint8_t board::get_en_passant_mask() const {return this->en_passant_mask;}
 
+std::pair <int, int> board::get_king_position(uint8_t player) const {
+	for (int i = 0; i < BOARD_HEIGHT; ++i)
+		for (int j = 0; j < BOARD_WIDTH; ++j)
+			if (this->squares[i][j] == make_piece(KING, player))
+				return {i, j};
+	assert(false);
+}
+
 board parse_fen(const std::string &fen){ //TODO: string_view
 	const std::vector<std::string> content = split(fen, ' ');
 	assert(content.size() >= 4 && content.size() <= 6);
@@ -339,12 +347,24 @@ uint8_t board::get_reachable_en_passant_first_heuristic(uint8_t player) const {
 #include <bitset>
 #define MASK(x) #x " = " << std::bitset<8>(x) << ""
 
+int board::min_moves_to_capture_king_with_pawns(uint8_t player) const {
+	auto [i, j] = this->get_king_position(opponent(player));
+	int move_dir = player == WHITE ? -1 : 1;
+	if (j > 0 && i + move_dir >= 0 && i + move_dir < BOARD_HEIGHT && this->squares[i + move_dir][j - 1] == make_piece(PAWN, player)) return 1;
+	if (j + 1 < BOARD_WIDTH && i + move_dir >= 0 && i + move_dir < BOARD_HEIGHT && this->squares[i + move_dir][j + 1] == make_piece(PAWN, player)) return 1;
+	return 4;
+}
+
 void board::finalize_en_passant() {
 	static_assert(BOARD_HEIGHT == 8 && DICE_COUNT == 3);
-	// std::cerr << MASK(this->en_passant_mask) << "\n";
 	if (!this->en_passant_mask) return;
 	int en_passant_rank = (this->to_move == BLACK ? 3 : 4);
 	int square_hopped_rank = (this->to_move == BLACK ? 2 : 5); //TODO: better name
+	int capture_king_dist = this->min_moves_to_capture_king_with_pawns(this->to_move);
+	if (capture_king_dist == 1) {
+		this->en_passant_mask = 0;
+		return;
+	}
 	for (size_t i = 0; i < BOARD_WIDTH; ++i) { //TODO: how much is there to gain from using __ctz to iterate through bits in all contexts like this?
 		if (this->en_passant_mask >> i & 1) {
 			if (!is_empty(this->squares[square_hopped_rank][i])) {
@@ -357,7 +377,6 @@ void board::finalize_en_passant() {
 			}
 		}
 	}
-	// std::cerr << MASK(this->en_passant_mask) << "\n";
 	if (!this->en_passant_mask) return;
 
 	
@@ -365,57 +384,63 @@ void board::finalize_en_passant() {
 
 	int dir = (this->to_move == BLACK ? 1 : -1);
 
-	for (int i = 0; i < BOARD_WIDTH; ++i) {
-		if (this->squares[en_passant_rank + dir][i] == make_piece(PAWN, this->to_move)) {
-			//It's OK to omit pushing forward from here as forward + en passant is always equivalent to normal capture + forward
-			// if (this->squares[en_passant_rank][i] == EMPTY || is_players(this->squares[en_passant_rank][i], this->to_move))
-				// reachable |= (1 << i);
-			if (i > 0 && this->squares[en_passant_rank][i - 1] != EMPTY && is_players(this->squares[en_passant_rank][i - 1], opponent(this->to_move)))
-				reachable |= (1 << (i - 1));
-			if (i + 1 < BOARD_WIDTH && this->squares[en_passant_rank][i + 1] != EMPTY && is_players(this->squares[en_passant_rank][i + 1], opponent(this->to_move)))
-				reachable |= (1 << (i + 1));
+	if (capture_king_dist > 2) {
+
+		for (int i = 0; i < BOARD_WIDTH; ++i) {
+			if (this->squares[en_passant_rank + dir][i] == make_piece(PAWN, this->to_move)) {
+				//It's OK to omit pushing forward from here as forward + en passant is always equivalent to normal capture + forward
+				// if (this->squares[en_passant_rank][i] == EMPTY || is_players(this->squares[en_passant_rank][i], this->to_move))
+					// reachable |= (1 << i);
+				if (i > 0 && this->squares[en_passant_rank][i - 1] != EMPTY && is_players(this->squares[en_passant_rank][i - 1], opponent(this->to_move)))
+					reachable |= (1 << (i - 1));
+				if (i + 1 < BOARD_WIDTH && this->squares[en_passant_rank][i + 1] != EMPTY && is_players(this->squares[en_passant_rank][i + 1], opponent(this->to_move)))
+					reachable |= (1 << (i + 1));
+			}
 		}
 	}
 
-	uint8_t mask_5th_rank = 0;
+	if (capture_king_dist > 3) {
 
-	for (int i = 0; i < BOARD_WIDTH; ++i) {
-		if (this->squares[en_passant_rank + 2 * dir][i] == make_piece(PAWN, this->to_move)) {
-			if (is_empty(this->squares[en_passant_rank + dir][i]))
+		uint8_t mask_5th_rank = 0;
+
+		for (int i = 0; i < BOARD_WIDTH; ++i) {
+			if (this->squares[en_passant_rank + 2 * dir][i] == make_piece(PAWN, this->to_move)) {
+				if (is_empty(this->squares[en_passant_rank + dir][i]))
+					mask_5th_rank |= (1 << i);
+				if (i > 0 && this->squares[en_passant_rank + dir][i - 1] != EMPTY && is_players(this->squares[en_passant_rank + dir][i - 1], opponent(this->to_move)))
+					mask_5th_rank |= (1 << (i - 1));
+				if (i + 1 < BOARD_WIDTH && this->squares[en_passant_rank + dir][i + 1] != EMPTY && is_players(this->squares[en_passant_rank + dir][i + 1], opponent(this->to_move)))
+					mask_5th_rank |= (1 << (i + 1));
+			}
+		}
+
+		for (int i = 0; i < BOARD_WIDTH; ++i) {
+			if (this->squares[en_passant_rank + 3 * dir][i] == make_piece(PAWN, this->to_move) && is_empty(this->squares[en_passant_rank + 2 * dir][i]) && is_empty(this->squares[en_passant_rank + dir][i])) {
 				mask_5th_rank |= (1 << i);
-			if (i > 0 && this->squares[en_passant_rank + dir][i - 1] != EMPTY && is_players(this->squares[en_passant_rank + dir][i - 1], opponent(this->to_move)))
-				mask_5th_rank |= (1 << (i - 1));
-			if (i + 1 < BOARD_WIDTH && this->squares[en_passant_rank + dir][i + 1] != EMPTY && is_players(this->squares[en_passant_rank + dir][i + 1], opponent(this->to_move)))
-				mask_5th_rank |= (1 << (i + 1));
+			}
 		}
-	}
 
-	for (int i = 0; i < BOARD_WIDTH; ++i) {
-		if (this->squares[en_passant_rank + 3 * dir][i] == make_piece(PAWN, this->to_move) && is_empty(this->squares[en_passant_rank + 2 * dir][i]) && is_empty(this->squares[en_passant_rank + dir][i])) {
-			mask_5th_rank |= (1 << i);
+		for (int i = 0; i < BOARD_WIDTH; ++i) {
+			if (mask_5th_rank >> i & 1) {
+				//It's OK to omit pushing forward from here as forward + en passant is always equivalent to normal capture + forward
+				// Therefore no: 
+				// if (is_empty(this->squares[en_passant_rank][i]))
+					// reachable |= (1 << i);
+				if (i > 0 && !is_empty(this->squares[en_passant_rank][i - 1]) && is_players(this->squares[en_passant_rank][i - 1], opponent(this->to_move)))
+					reachable |= (1 << (i - 1));
+				if (i + 1 < BOARD_WIDTH && !is_empty(this->squares[en_passant_rank][i + 1]) && is_players(this->squares[en_passant_rank][i + 1], opponent(this->to_move)))
+					reachable |= (1 << (i + 1));
+			}
 		}
-	}
 
-	for (int i = 0; i < BOARD_WIDTH; ++i) {
-		if (mask_5th_rank >> i & 1) {
-			//It's OK to omit pushing forward from here as forward + en passant is always equivalent to normal capture + forward
-			// Therefore no: 
-			// if (is_empty(this->squares[en_passant_rank][i]))
-				// reachable |= (1 << i);
-			if (i > 0 && !is_empty(this->squares[en_passant_rank][i - 1]) && is_players(this->squares[en_passant_rank][i - 1], opponent(this->to_move)))
-				reachable |= (1 << (i - 1));
-			if (i + 1 < BOARD_WIDTH && !is_empty(this->squares[en_passant_rank][i + 1]) && is_players(this->squares[en_passant_rank][i + 1], opponent(this->to_move)))
-				reachable |= (1 << (i + 1));
-		}
 	}
-
 	for (int i = 0; i < BOARD_WIDTH; ++i) {
 		if (this->squares[en_passant_rank][i] == make_piece(PAWN, this->to_move))
 			reachable |= (1 << i);
 	}
-	
-	// std::cerr << MASK(mask_5th_rank) << "\n";
-	// std::cerr << MASK(reachable) << "\n";
+		
+		// std::cerr << MASK(mask_5th_rank) << "\n";
+		// std::cerr << MASK(reachable) << "\n";
 
 	this->en_passant_mask &= (reachable << 1) | (reachable >> 1);
 

@@ -93,6 +93,7 @@ class board {
 	void move_piece(int from_x, int from_y, int to_x, int to_y);
 	void clear_square(int x, int y);
 	void put_piece(int x, int y, uint8_t piece);
+	int min_moves_to_capture_king_with_pawns(uint8_t player) const;
 public:
 	movelist generate_moves() const;
 	partial_movelist generate_partial_moves() const;
@@ -109,6 +110,7 @@ public:
 	void finalize_en_passant();
 	void shift_in_place(int x);
 	std::vector <int> get_shift_range() const;
+	std::pair <int, int> get_king_position(uint8_t player) const;
 };
 
 
