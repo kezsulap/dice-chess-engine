@@ -349,9 +349,11 @@ void board::finalize_en_passant() {
 		if (this->en_passant_mask >> i & 1) {
 			if (!is_empty(this->squares[square_hopped_rank][i])) {
 				assert(is_players(this->squares[square_hopped_rank][i], oppnonent(this->to_move)));
-				//TODO: if !is_attacked_by_anything_other_than_the_pawn(square_hopped_rank, i, this->to_move) reset i-th bit (other than that pawn => possibly 2 pawns)
-				if ((i == 0 || this->squares[en_passant_rank][i - 1] != make_piece(PAWN, this->to_move)) && (i == BOARD_WIDTH + 1 || this->squares[en_passant_rank][i + 1] != make_piece(PAWN, this->to_move)))
+				if (this->squares[square_hopped_rank][i] == make_piece(opponent(this->to_move), KING))
 					this->en_passant_mask &= ~(1 << i);
+				else if ((i == 0 || this->squares[en_passant_rank][i - 1] != make_piece(PAWN, this->to_move)) && (i == BOARD_WIDTH + 1 || this->squares[en_passant_rank][i + 1] != make_piece(PAWN, this->to_move)))
+					this->en_passant_mask &= ~(1 << i);
+				//TODO: if !is_attacked_by_anything_other_than_the_pawn(square_hopped_rank, i, this->to_move) reset i-th bit (other than that pawn => possibly 2 pawns)
 			}
 		}
 	}
