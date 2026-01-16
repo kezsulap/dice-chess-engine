@@ -132,7 +132,7 @@ std::pair <int, int> board::get_king_position(uint8_t player) const {
 		for (int j = 0; j < BOARD_WIDTH; ++j)
 			if (this->squares[i][j] == make_piece(KING, player))
 				return {i, j};
-	assert(false);
+	__builtin_unreachable();
 }
 
 board parse_fen(const std::string &fen){ //TODO: string_view
@@ -327,8 +327,6 @@ dice_roll dice_roll::append(uint8_t piece) const {
 	return ret;
 }
 
-#define assert(...)
-
 uint8_t board::get_reachable_en_passant_first_heuristic(uint8_t player) const {
 	static_assert(BOARD_HEIGHT == 8 && DICE_COUNT == 3);
 	uint8_t ret = 0;
@@ -389,7 +387,7 @@ void board::finalize_en_passant() {
 	for (size_t i = 0; i < BOARD_WIDTH; ++i) { //TODO: how much is there to gain from using __ctz to iterate through bits in all contexts like this?
 		if (this->en_passant_mask >> i & 1) {
 			if (!is_empty(this->squares[square_hopped_rank][i])) {
-				assert(is_players(this->squares[square_hopped_rank][i], oppnonent(this->to_move)));
+				assert(is_players(this->squares[square_hopped_rank][i], opponent(this->to_move)));
 				if (this->squares[square_hopped_rank][i] == make_piece(opponent(this->to_move), KING))
 					this->en_passant_mask &= ~(1 << i);
 				else if ((i == 0 || this->squares[en_passant_rank][i - 1] != make_piece(PAWN, this->to_move)) && (i == BOARD_WIDTH - 1 || this->squares[en_passant_rank][i + 1] != make_piece(PAWN, this->to_move)))
@@ -913,7 +911,7 @@ std::vector <int> board::get_shift_range() const {
 			}
 		}
 	}
-	assert(leftmost != numeric_limits<int>::max());
+	assert(leftmost != std::numeric_limits<int>::max());
 	assert(rightmost != -1);
 	std::vector<int> ret;
 	for (int j = -leftmost; j < BOARD_WIDTH - rightmost; ++j) {
